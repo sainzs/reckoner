@@ -111,7 +111,7 @@ class OrientationOverlay {
   }
 
   handleInput(data: string) {
-    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+o") || matchesKey(data, "q")) {
+    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+shift+o") || matchesKey(data, "q")) {
       this.onClose()
       return
     }
@@ -195,7 +195,7 @@ export default function harnessOverlayExtension(pi: ExtensionAPI) {
     cwd = ctx.cwd
   })
 
-  pi.registerShortcut("ctrl+o", {
+  pi.registerShortcut("ctrl+shift+o", {
     description: "Open orientation overlay",
     handler: async (ctx) => {
       const sections = buildSections(cwd || ctx.cwd)

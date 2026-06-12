@@ -67,7 +67,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
   })
 
   // Toggle shortcut
-  pi.registerShortcut("ctrl+t", {
+  pi.registerShortcut("ctrl+shift+t", {
     description: "Toggle between Plan and Build mode",
     handler: async (ctx) => {
       currentMode = currentMode === "build" ? "plan" : "build"
