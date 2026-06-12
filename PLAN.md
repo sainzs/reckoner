@@ -258,12 +258,26 @@ For each step:
 - **Semantic search** (embedding-based recall) — keyword search is good enough for v1.
   The memories are short and categorical. We don't need cosine similarity yet.
 
-## Success Criteria
+## Status
 
-The loop is closed when this is true:
+**The loop is closed.** Verified end-to-end (2026-03-29):
 
-> An agent makes a type error in session N. Auto-verify catches it. The agent fixes it.
-> A lesson is automatically recorded. In session N+1, the agent starts with that lesson
-> in its context. It does not make the same mistake.
+> Session 1: agent introduced type error in src/math.ts, auto-verify caught TS2322,
+> agent fixed it, lesson written to mistakes.md automatically.
+> Session 2: buildInjection surfaced the lesson in the system prompt, agent reported
+> it without being told. The lesson survived the session boundary.
 
-That's one sentence. That's the product.
+Since then:
+- Budget enforcement fixed (sections respect remaining budget, not just thresholds)
+- Task tracking added (structured plans that survive context compression)
+- Auto-verify extended to any language via headless nvim LSP diagnostics
+- Tasks status bar fix (blank → "no task" after completion)
+
+### What's next
+
+The loop exists and works. These deepen it:
+
+1. **Relevance filtering** — inject lessons relevant to the files being edited, not just recent
+2. **Learned principles** — synthesize recurring mistakes into principles.ts dynamically
+3. **Custom compaction** — preserve memory across context compression
+4. **Loop metrics** — track whether recalled lessons actually prevent repeated mistakes
