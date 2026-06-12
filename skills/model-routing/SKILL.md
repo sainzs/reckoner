@@ -30,5 +30,5 @@ It helps you choose a model based on the task instead of defaulting to one model
 
 - `plan` mode should prefer the strongest reasoning model.
 - `build` mode should prefer the balanced coding model.
-- `repo_map`, `nvim_diagnostics`, and file search tasks should stay on the fast model.
+- `repo_map`, `sg_search`, and file-search tasks should stay on the fast model.
 - If you are doing a review pass, prefer the lighter review model unless the bug is deeply architectural.

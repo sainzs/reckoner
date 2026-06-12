@@ -131,9 +131,7 @@ export default function repoMapExtension(pi: ExtensionAPI) {
     description:
       "Structural overview of the codebase: file tree and key symbols (functions, classes, types). Use before diving into unfamiliar code.",
     promptSnippet: "Structural codebase overview (files, symbols)",
-    promptGuidelines: [
-      "Use repo_map with a path filter to focus on a specific directory or module.",
-    ],
+    promptGuidelines: [],
     parameters: Type.Object({
       mode: StringEnum(["tree", "symbols", "overview"] as const, {
         description:

@@ -60,10 +60,7 @@ export default function astGrepExtension(pi: ExtensionAPI) {
       "\n" +
       "If rewrite is provided, shows a preview diff without applying. Use edit to apply.",
     promptSnippet: "Search code by AST pattern (structural, not text)",
-    promptGuidelines: [
-      "Prefer sg_search over grep/rg when you need to match code structure (e.g. all functions with a specific shape).",
-      "Use $NAME for single nodes, $$$ for variadic matches (bodies, args).",
-    ],
+    promptGuidelines: [],
     parameters: Type.Object({
       pattern: Type.String({
         description: "AST pattern to search for. Use $NAME for single nodes, $$$ for variadic.",

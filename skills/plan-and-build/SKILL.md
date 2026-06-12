@@ -5,41 +5,20 @@ description: Plans a non-trivial feature end-to-end before writing code — scop
 
 # Plan and Build
 
-Use this for anything bigger than a single-file change.
+For anything bigger than a single-file change.
 
-## Phase 1 — Understand
-1. Read `AGENTS.md`, `README.md`, relevant source files.
-2. Run `recall()` for anything related to this area.
-3. Map the relevant code with `repo_map` and `nvim_symbols`: what files own what behavior?
-4. Identify what you don't know — library APIs, system constraints, user intent.
-5. Research unknowns with `web_search` / `web_fetch` before planning.
+## Understand
+1. Read AGENTS.md and relevant source. recall() for related context.
+2. repo_map + sg_search to map ownership. Research unknowns with web_search.
 
-## Phase 2 — Plan
-Write a plan before touching anything:
-- What is the goal in one sentence?
-- What are the affected files?
-- What is the implementation order? (dependencies first)
-- What are the risks or unknowns that could invalidate the plan?
-- What is the rollback if something goes wrong?
-- What tests will confirm it's correct?
+## Plan
+- Goal in one sentence. Affected files. Implementation order. Risks. Tests.
+- Show the plan before implementing if complex or high-risk.
 
-Use `tasks("plan", title, steps)` to create a structured plan that persists across context.
+## Implement
+- Work in order. After each step: targeted test + typecheck.
+- If plan is invalidated — stop, reassess, update.
 
-**Stop here and show the plan if the task is complex or high-risk.**
-
-## Phase 3 — Implement
-- Work through the plan in order. Use `tasks("check", step)` as you complete each step.
-- After each meaningful step: run tests, run `nvim_diagnostics` on changed files.
-- If something invalidates the plan — stop, reassess, update the plan.
-- Checkpoint with `git add -A && git stash` before risky changes.
-
-## Phase 4 — Verify
-- Run the full test suite.
-- Run `nvim_diagnostics` on all changed files.
-- Read the full diff: `git diff HEAD`.
-- If auto-verify fires — fix before finishing.
-
-## Phase 5 — Close
-- `remember("codebase", ...)` with architectural decisions made.
-- `remember("questions", ...)` with anything left open.
-- Summarize: what was built, how it was tested, what was left out and why.
+## Close
+- Full test suite. Read `git diff HEAD`. Fix any auto-verify errors.
+- remember("codebase"|"questions", ...) for decisions and open items.

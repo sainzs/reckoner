@@ -5,32 +5,7 @@ description: Researches a library, API, error, or concept online and returns a f
 
 # Research Docs
 
-Use this when you need to understand something before implementing — a library API,
-an error message, a framework concept, or any unknown.
-
-## Workflow
-
-1. **Check memory first.** Run `recall()` — you may have researched this before.
-
-2. **Search.** Use `web_search` with a specific query.
-   - Good: `"vitest mock module typescript esm"`
-   - Bad: `"how to test"`
-
-3. **Pick the best 2–3 results.** Official docs > blog posts > Stack Overflow > random articles.
-
-4. **Fetch and read.** Use `web_fetch` on each URL. Read the actual content.
-
-5. **Extract only what's needed.** Don't summarize everything — answer the specific question.
-   - What's the API signature?
-   - What's the correct config option?
-   - What does this error mean and how do you fix it?
-
-6. **Save findings.** If this is likely to come up again:
-   - `remember("codebase", ...)` for library/API patterns
-   - `remember("mistakes", ...)` for gotchas you discovered
-
-## Quality bar
-- One correct answer beats five uncertain ones.
-- If official docs contradict a blog post, trust official docs.
-- Note the source URL so it can be re-fetched for deeper reading.
-- If the answer is "it depends" — say what it depends on specifically.
+1. recall() first — you may have researched this before.
+2. web_search with a specific query. Pick 2–3 best results (official docs first).
+3. web_fetch and read. Extract only the specific answer needed.
+4. remember("codebase"|"mistakes", ...) if likely to come up again. Note source URL.

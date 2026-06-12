@@ -112,9 +112,7 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     description:
       "Fetch a URL and return its content as clean markdown via Jina Reader. Good for docs, articles, and any web content.",
     promptSnippet: "Fetch any URL as clean markdown",
-    promptGuidelines: [
-      "Prefer web_fetch over bash curl — returns clean markdown. Some Cloudflare sites return 403.",
-    ],
+    promptGuidelines: [],
     parameters: Type.Object({
       url: Type.String({ description: "Full URL to fetch (must start with http:// or https://)" }),
     }),
@@ -141,9 +139,7 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     description:
       "Search the web via Jina Search API. Returns results with titles, URLs, and snippets. Requires JINA_API_KEY.",
     promptSnippet: "Search the web for docs, solutions, or information",
-    promptGuidelines: [
-      "After searching, web_fetch the best results. Without JINA_API_KEY, web_fetch doc sites directly.",
-    ],
+    promptGuidelines: [],
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
     }),

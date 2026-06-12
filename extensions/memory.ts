@@ -348,9 +348,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
     description:
       "Save a note to persistent memory. Captures learnings, decisions, mistakes, or questions that survive across sessions.",
     promptSnippet: "Save to persistent memory",
-    promptGuidelines: [
-      "Call remember() at session end. Be specific — vague notes are useless.",
-    ],
+    promptGuidelines: [],
     parameters: Type.Object({
       category: StringEnum([...CATEGORIES] as const, {
         description:

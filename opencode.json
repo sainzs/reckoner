@@ -1,25 +1,93 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode-go/kimi-k2.5",
-  "small_model": "opencode-go-minimax/minimax-m2.5",
+  "provider": {
+    "opencode-go": {}
+  },
+  "model": "opencode-go/minimax-m2.7",
+  "small_model": "opencode-go/mimo-v2-pro-free",
+  "default_agent": "build",
+  "instructions": ["./AGENTS.md", "./PLAN.md", "./REVIEW.md", "./HARNESS.md"],
+  "permission": {
+    "*": "ask",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "question": "allow",
+    "webfetch": "allow",
+    "bash": "allow",
+    "edit": "allow",
+    "task": "allow",
+    "external_directory": "ask"
+  },
+  "share": "disabled",
+  "snapshot": true,
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 8000
+  },
+  "watcher": {
+    "ignore": ["node_modules/**", "dist/**", "build/**", ".git/**", ".pi/**"]
+  },
   "agent": {
     "build": {
-      "model": "opencode-go/kimi-k2.5"
+      "description": "Default terminal-first Reckoner build agent",
+      "mode": "primary",
+      "model": "opencode-go/minimax-m2.7",
+      "temperature": 0.2,
+      "steps": 12,
+      "permission": {
+        "bash": "allow",
+        "edit": "allow",
+        "task": {
+          "*": "allow",
+          "plan": "allow",
+          "explore": "allow",
+          "code-reviewer": "allow"
+        }
+      }
     },
     "plan": {
-      "model": "opencode-go/glm-5"
+      "description": "Read-only analysis and implementation planning",
+      "mode": "primary",
+      "model": "opencode-go/mimo-v2-pro-free",
+      "temperature": 0.1,
+      "steps": 6,
+      "permission": {
+        "bash": "ask",
+        "edit": "deny",
+        "task": {
+          "*": "deny",
+          "explore": "allow"
+        }
+      }
     },
     "explore": {
+      "description": "Fast read-only repository exploration",
       "mode": "subagent",
-      "model": "opencode-go-minimax/minimax-m2.5"
+      "model": "opencode-go/kimi-k2.5",
+      "temperature": 0.1,
+      "steps": 4,
+      "hidden": true,
+      "permission": {
+        "bash": "allow",
+        "edit": "deny"
+      }
     },
     "code-reviewer": {
+      "description": "Short, high-signal code review",
       "mode": "subagent",
-      "description": "Reviews code for correctness, regressions, and clarity",
-      "model": "opencode-go-minimax/minimax-m2.7",
+      "model": "opencode-go/kimi-k2.5",
+      "temperature": 0.1,
+      "steps": 4,
+      "hidden": true,
       "permission": {
+        "bash": "allow",
         "edit": "deny",
-        "bash": "ask"
+        "task": {
+          "*": "deny"
+        }
       }
     }
   }

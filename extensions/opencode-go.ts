@@ -22,6 +22,11 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
  * Model IDs in pi:
  *   opencode-go/glm-5
  *   opencode-go/kimi-k2.5
+ *   opencode-go/kimi-k2.5-1m
+ *   opencode-go/kimi-k2.5-3m
+ *   opencode-go/kimi-k2.5-v
+ *   opencode-go/mimo-v2-pro
+ *   opencode-go/mimo-v2-omni
  *   opencode-go-minimax/minimax-m2.5
  *   opencode-go-minimax/minimax-m2.7
  */
@@ -58,6 +63,81 @@ export default function opencodeGoExtension(pi: ExtensionAPI) {
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 131072,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      {
+        id: "kimi-k2.5-1m",
+        name: "Kimi K2.5 1M (OpenCode Go)",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      {
+        id: "kimi-k2.5-3m",
+        name: "Kimi K2.5 3M (OpenCode Go)",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 3000000,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      {
+        id: "kimi-k2.5-v",
+        name: "Kimi K2.5 Vision (OpenCode Go)",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      {
+        id: "mimo-v2-pro",
+        name: "MiMo V2 Pro (OpenCode Go)",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      {
+        id: "mimo-v2-omni",
+        name: "MiMo V2 Omni (OpenCode Go)",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
         maxTokens: 16384,
         compat: {
           supportsDeveloperRole: false,
