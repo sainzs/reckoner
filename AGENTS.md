@@ -72,7 +72,7 @@ These are not independent features. They are organs in one system.
 | `inject.ts` | Deterministic system prompt assembly. Collects injections by priority. |
 | `harness-widget.ts` | Orientation widget above editor. Task + memory at a glance. |
 | `harness-footer.ts` | Unified footer with consolidated status + token usage. |
-| `harness-overlay.ts` | Ctrl+O orientation overlay. Full memory/task browser. |
+| `harness-overlay.ts` | Ctrl+Shift+O orientation overlay. Explainability and memory/task browser. |
 | `ast-grep.ts` | Structural code search + rewrite via AST patterns. |
 
 ## Memory architecture
@@ -126,7 +126,7 @@ reckoner/
 │   ├── nvim-server.ts       # persistent headless nvim server
 │   ├── harness-widget.ts    # orientation widget (task + memory)
 │   ├── harness-footer.ts    # unified custom footer
-│   ├── harness-overlay.ts   # orientation overlay (Ctrl+O)
+│   ├── harness-overlay.ts   # orientation overlay (Ctrl+Shift+O)
 │   ├── ast-grep.ts          # structural code search/rewrite
 │   └── lib/                 # shared utilities (not extensions)
 │       └── parse-plan.ts    # task plan parser (used by 3 extensions)

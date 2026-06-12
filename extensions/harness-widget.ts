@@ -1,115 +1,111 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { truncateToWidth } from "@mariozechner/pi-tui"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-import { parsePlan } from "./lib/parse-plan.js"
+import type { LessonRecord, TaskState, VerifyResult } from "./lib/lesson-types.js"
 
-/**
- * Harness widget: orientation-only display above the editor.
- *
- * Shows task progress and memory counts. System status (git, verify,
- * nvim, mode) lives in the footer — not here.
- *
- * Refreshes on: session_start, agent_start, agent_end, turn_end
- * Reads from: .pi/tasks.md, .pi/memory/
- */
-
-// ─── Memory counting ────────────────────────────────────────
-
-const CATEGORIES = ["mistakes", "codebase", "preferences", "questions", "journal"] as const
-
-function countEntries(dir: string): Record<string, number> {
-  const counts: Record<string, number> = {}
-  for (const cat of CATEGORIES) {
-    const file = join(dir, `${cat}.md`)
-    if (!existsSync(file)) { counts[cat] = 0; continue }
-    const content = readFileSync(file, "utf8")
-    counts[cat] = content.split(/^## /m).filter(b => b.trim()).length
+interface WidgetState {
+  task?: TaskState
+  topRisk?: {
+    summary: string
+    severity: "info" | "warn" | "error"
   }
-  return counts
 }
 
-// ─── Widget builder ─────────────────────────────────────────
-
-function buildWidgetLines(cwd: string): string[] {
-  const lines: string[] = []
-
-  // Task: title + progress, next step
-  const tasksFile = join(cwd, ".pi", "tasks.md")
-  if (existsSync(tasksFile)) {
-    const content = readFileSync(tasksFile, "utf8").trim()
-    if (content) {
-      const plan = parsePlan(content)
-      if (plan && plan.steps.length > 0) {
-        const done = plan.steps.filter(s => s.checked).length
-        const total = plan.steps.length
-        const next = plan.steps.find(s => !s.checked)
-        lines.push(`task: ${plan.title} (${done}/${total})`)
-        if (next) {
-          lines.push(`next: ${next.text}`)
-        }
-      }
-    }
+function summarizeVerifyRisk(result: VerifyResult): WidgetState["topRisk"] | undefined {
+  const issue = result.introduced[0] ?? result.testFailures[0]
+  if (!issue) return undefined
+  const location = issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ""}` : issue.source
+  return {
+    summary: `${location} — ${issue.message}`,
+    severity: issue.source === "test" ? "error" : "warn",
   }
-
-  // Memory: compact counts
-  const memDir = join(cwd, ".pi", "memory")
-  if (existsSync(memDir)) {
-    const counts = countEntries(memDir)
-    const memParts: string[] = []
-    for (const cat of CATEGORIES) {
-      if (counts[cat] > 0) {
-        memParts.push(`${counts[cat]} ${cat}`)
-      }
-    }
-    if (memParts.length > 0) {
-      lines.push(`mem: ${memParts.join(" · ")}`)
-    }
-  }
-
-  return lines
 }
-
-// ─── Extension ──────────────────────────────────────────────
 
 export default function harnessWidgetExtension(pi: ExtensionAPI) {
-  let cwd = ""
+  let enabled = true
+  const state: WidgetState = {}
 
-  function refresh(ctx: any) {
-    if (!ctx.hasUI) return
-
-    const lines = buildWidgetLines(cwd)
-
-    if (lines.length > 0) {
-      ctx.ui.setWidget("harness", (_tui: any, theme: any) => {
-        return {
-          render: (width: number) => {
-            return lines.map((line: string) => {
-              const colonIdx = line.indexOf(":")
-              if (colonIdx === -1) return truncateToWidth(line, width)
-              const label = line.slice(0, colonIdx + 1)
-              const value = line.slice(colonIdx + 1)
-              return truncateToWidth(theme.fg("dim", label) + value, width)
-            })
-          },
-          invalidate: () => {},
-        }
-      })
-    } else {
-      ctx.ui.setWidget("harness", undefined)
+  function renderLines(): string[] {
+    const lines: string[] = []
+    if (state.task) {
+      lines.push(`task: ${state.task.title} (${state.task.done}/${state.task.total})`)
+      if (state.task.nextStep) lines.push(`next: ${state.task.nextStep}`)
     }
+    if (state.topRisk) {
+      lines.push(`risk: ${state.topRisk.summary}`)
+    }
+    return lines.slice(0, 3)
   }
 
-  pi.on("session_start", async (_event, ctx) => {
-    cwd = ctx.cwd
-    // Remove the old workspace-context widget to avoid duplication
-    if (ctx.hasUI) {
-      ctx.ui.setWidget("workspace-context", undefined)
+  function refresh(ctx: any) {
+    if (!ctx.hasUI || !enabled) return
+    const lines = renderLines()
+    if (lines.length === 0) {
+      ctx.ui.setWidget("harness", undefined)
+      return
     }
+
+    ctx.ui.setWidget("harness", (_tui: any, theme: any) => ({
+      render: (width: number) => lines.map((line) => {
+        const colonIdx = line.indexOf(":")
+        const label = colonIdx >= 0 ? line.slice(0, colonIdx + 1) : line
+        const value = colonIdx >= 0 ? line.slice(colonIdx + 1) : ""
+        if (line.startsWith("risk:") && state.topRisk?.severity) {
+          const color = state.topRisk.severity === "error" ? "error" : state.topRisk.severity === "warn" ? "warning" : "accent"
+          return truncateToWidth(theme.fg("dim", label) + theme.fg(color, value.trimStart()), width)
+        }
+        return truncateToWidth(theme.fg("dim", label) + value, width)
+      }),
+      invalidate: () => {},
+    }))
+  }
+
+  pi.events.on("reckoner:task-updated", (task: TaskState | null) => {
+    state.task = task ?? undefined
+  })
+
+  pi.events.on("reckoner:verify-result", (result: VerifyResult) => {
+    state.topRisk = summarizeVerifyRisk(result)
+  })
+
+  pi.events.on("reckoner:memory-updated", (summary: any) => {
+    const lesson = summary?.lastRecord as LessonRecord | undefined
+    if (!lesson || lesson.category !== "mistakes") return
+    if (!state.topRisk && lesson.summary) {
+      state.topRisk = {
+        summary: lesson.summary,
+        severity: lesson.resolved === false ? "warn" : "info",
+      }
+    }
+  })
+
+  pi.on("session_start", async (_event: any, ctx: any) => {
     refresh(ctx)
   })
 
-  pi.on("agent_start", async (_event, ctx) => { refresh(ctx) })
-  pi.on("agent_end", async (_event, ctx) => { refresh(ctx) })
-  pi.on("turn_end", async (_event, ctx) => { refresh(ctx) })
+  pi.on("agent_end", async (_event: any, ctx: any) => {
+    refresh(ctx)
+  })
+
+  pi.on("turn_end", async (_event: any, ctx: any) => {
+    refresh(ctx)
+  })
+
+  pi.registerCommand("widget", {
+    description: "Toggle the harness widget on/off",
+    handler: async (args: string, ctx: any) => {
+      const mode = args.trim().toLowerCase()
+      if (mode === "off") enabled = false
+      else if (mode === "on") enabled = true
+      else enabled = !enabled
+
+      if (!enabled) {
+        ctx.ui.setWidget("harness", undefined)
+        ctx.ui.notify("Harness widget disabled", "info")
+        return
+      }
+
+      refresh(ctx)
+      ctx.ui.notify("Harness widget enabled", "info")
+    },
+  })
 }

@@ -1,18 +1,10 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
+import { truncateToWidth } from "@mariozechner/pi-tui"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import type { InjectionBuildContext, WorkspaceState } from "./lib/lesson-types.js"
 
-type WorkspaceSnapshot = {
-  cwd: string;
-  root?: string;
-  branch?: string;
-  dirtyCount?: number;
-  dirtyFiles: string[];
-  packageName?: string;
-  scripts: string[];
-}
-
-let snapshot: WorkspaceSnapshot | null = null
+let snapshot: WorkspaceState | null = null
 
 async function runText(pi: ExtensionAPI, command: string, args: string[]): Promise<string | undefined> {
   try {
@@ -24,13 +16,13 @@ async function runText(pi: ExtensionAPI, command: string, args: string[]): Promi
   }
 }
 
-function readPackageInfo(cwd: string): Pick<WorkspaceSnapshot, "packageName" | "scripts"> {
+function readPackageInfo(cwd: string): Pick<WorkspaceState, "packageName" | "scripts"> {
   const packageJsonPath = join(cwd, "package.json")
   if (!existsSync(packageJsonPath)) return { scripts: [] }
 
   try {
     const raw = readFileSync(packageJsonPath, "utf8")
-    const pkg = JSON.parse(raw) as { name?: string; scripts?: Record<string, unknown> }
+    const pkg = JSON.parse(raw) as { name?: string, scripts?: Record<string, unknown> }
     return {
       packageName: typeof pkg.name === "string" ? pkg.name : undefined,
       scripts: Object.keys(pkg.scripts ?? {}),
@@ -40,7 +32,7 @@ function readPackageInfo(cwd: string): Pick<WorkspaceSnapshot, "packageName" | "
   }
 }
 
-async function buildSnapshot(pi: ExtensionAPI, cwd: string): Promise<WorkspaceSnapshot> {
+async function buildSnapshot(pi: ExtensionAPI, cwd: string): Promise<WorkspaceState> {
   const root = await runText(pi, "git", ["-C", cwd, "rev-parse", "--show-toplevel"])
   const branch = root ? await runText(pi, "git", ["-C", cwd, "branch", "--show-current"]) : undefined
   const status = root ? await runText(pi, "git", ["-C", cwd, "status", "--short"]) : undefined
@@ -58,26 +50,25 @@ async function buildSnapshot(pi: ExtensionAPI, cwd: string): Promise<WorkspaceSn
   }
 }
 
-function formatSnapshot(snapshot: WorkspaceSnapshot): string[] {
-  const lines = ["Workspace snapshot:", `- cwd: ${snapshot.cwd}`]
+function formatSnapshot(nextSnapshot: WorkspaceState): string[] {
+  const lines = ["Workspace snapshot:", `- cwd: ${nextSnapshot.cwd}`]
 
-  if (snapshot.root) {
-    const branch = snapshot.branch ?? "detached"
-    const dirty = snapshot.dirtyCount ?? 0
-    lines.push(`- git: ${branch}${dirty > 0 ? ` (${dirty} dirty)` : " (clean)"}`)
+  if (nextSnapshot.root) {
+    const branch = nextSnapshot.branch ?? "detached"
+    lines.push(`- git: ${branch}${nextSnapshot.dirtyCount > 0 ? ` (${nextSnapshot.dirtyCount} dirty)` : " (clean)"}`)
   }
 
-  if (snapshot.packageName) {
-    lines.push(`- package: ${snapshot.packageName}`)
+  if (nextSnapshot.packageName) {
+    lines.push(`- package: ${nextSnapshot.packageName}`)
   }
 
-  if (snapshot.scripts.length > 0) {
-    lines.push(`- scripts: ${snapshot.scripts.slice(0, 8).join(", ")}`)
+  if (nextSnapshot.scripts.length > 0) {
+    lines.push(`- scripts: ${nextSnapshot.scripts.slice(0, 8).join(", ")}`)
   }
 
-  if (snapshot.dirtyFiles.length > 0) {
+  if (nextSnapshot.dirtyFiles.length > 0) {
     lines.push("- dirty files:")
-    for (const file of snapshot.dirtyFiles.slice(0, 6)) {
+    for (const file of nextSnapshot.dirtyFiles.slice(0, 6)) {
       lines.push(`  - ${file}`)
     }
   }
@@ -85,45 +76,61 @@ function formatSnapshot(snapshot: WorkspaceSnapshot): string[] {
   return lines
 }
 
-function updateUi(ctx: any, snapshot: WorkspaceSnapshot) {
-  const lines = formatSnapshot(snapshot)
-  if (!ctx.hasUI) return
-
-  ctx.ui.setStatus(
-    "workspace-context",
-    snapshot.root
-      ? `${snapshot.branch ?? "detached"}${snapshot.dirtyCount ? ` • ${snapshot.dirtyCount} dirty` : ""}`
-      : "no git repo",
-  )
-  ctx.ui.setWidget("workspace-context", lines)
+function buildPromptBlock(nextSnapshot: WorkspaceState): string {
+  return ["", ...formatSnapshot(nextSnapshot)].join("\n")
 }
 
-function buildPromptBlock(snapshot: WorkspaceSnapshot): string {
-  const lines = formatSnapshot(snapshot)
-  return ["", ...lines].join("\n")
+function widgetLine(nextSnapshot: WorkspaceState): string {
+  const parts: string[] = []
+  if (nextSnapshot.packageName) parts.push(nextSnapshot.packageName)
+  if (nextSnapshot.root) {
+    const branch = nextSnapshot.branch ?? "detached"
+    const dirty = nextSnapshot.dirtyCount > 0 ? ` · ${nextSnapshot.dirtyCount} changes` : ""
+    parts.push(`${branch}${dirty}`)
+  }
+  return parts.join("  ·  ")
+}
+
+function updateUi(ctx: any, nextSnapshot: WorkspaceState) {
+  if (!ctx.hasUI) return
+  const line = widgetLine(nextSnapshot)
+  if (line) {
+    ctx.ui.setWidget("workspace-context", (_tui: any, theme: any) => ({
+      render: (width: number) => [truncateToWidth(theme.fg("dim", line), width)],
+      invalidate: () => {},
+    }))
+  }
 }
 
 export default function workspaceContextExtension(pi: ExtensionAPI) {
   async function refresh(ctx: any) {
     snapshot = await buildSnapshot(pi, ctx.cwd)
     updateUi(ctx, snapshot)
+    pi.events.emit("reckoner:workspace-updated", snapshot)
     return snapshot
   }
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (_event: any, ctx: any) => {
     await refresh(ctx)
     pi.events.emit("reckoner:register-injection", {
       key: "workspace-context",
       priority: 20,
-      build: () => snapshot ? buildPromptBlock(snapshot) : "",
+      maxChars: 700,
+      build: (_context: InjectionBuildContext) => snapshot ? {
+        key: "workspace-context",
+        text: buildPromptBlock(snapshot),
+        chars: buildPromptBlock(snapshot).length,
+        reason: snapshot.branch ? `workspace ${snapshot.branch}` : "workspace snapshot",
+        priority: 20,
+      } : null,
     })
   })
 
   pi.registerCommand("snapshot", {
     description: "Refresh the workspace snapshot and show it",
-    handler: async (_args, ctx) => {
-      await refresh(ctx)
-      ctx.ui.notify("Workspace snapshot refreshed", "info")
+    handler: async (_args: string, ctx: any) => {
+      const next = await refresh(ctx)
+      ctx.ui.notify(formatSnapshot(next).join("\n"), "info")
     },
   })
 }

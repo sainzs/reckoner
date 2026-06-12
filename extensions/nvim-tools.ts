@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { writeFileSync, mkdtempSync, unlinkSync } from "node:fs"
+import { NVIM_INIT_PATH } from "./lib/package-path.js"
 
 /**
  * Nvim tools: agent-native code intelligence through your real editor stack.
@@ -17,10 +18,10 @@ import { writeFileSync, mkdtempSync, unlinkSync } from "node:fs"
  * Requires:
  *   - nvim 0.10+ with treesitter parsers installed
  *   - Language servers on PATH (ts_ls, pyright, gopls, etc.)
- *   - Reckoner nvim config at ~/Code/reckoner/nvim/init.lua
+ *   - Reckoner nvim config (path resolved from package root)
  */
 
-const RECKONER_NVIM_INIT = resolve(process.env.HOME ?? "~", "Code/reckoner/nvim/init.lua")
+const RECKONER_NVIM_INIT = NVIM_INIT_PATH
 const NVIM_TIMEOUT = 25_000
 const LSP_WAIT_SECS = 15
 const SERVER_POLL_INTERVAL = 300 // ms

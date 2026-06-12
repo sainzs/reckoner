@@ -97,7 +97,7 @@ main (clean) │ verify ✓ │ nvim ✓ │ 📋 plan │ turn 3 │ ↑12.3k �
 - Aggregates status from all extensions via events or shared state
 - Color-codes: green for healthy, yellow for warnings, red for errors
 
-### Phase 3: Orientation overlay (Ctrl+O)
+### Phase 3: Orientation overlay (Ctrl+Shift+O)
 
 **What:** A keyboard shortcut that pops up a full orientation panel. Like opening your journal.
 
@@ -141,10 +141,10 @@ main (clean) │ verify ✓ │ nvim ✓ │ 📋 plan │ turn 3 │ ↑12.3k �
 - Doesn't interfere with chat — it's an overlay you open and close
 
 **Extension:** `extensions/harness-overlay.ts`
-- `pi.registerShortcut("ctrl+o", ...)` opens the overlay
+- `pi.registerShortcut("ctrl+shift+o", ...)` opens the overlay
 - Uses `ctx.ui.custom(factory, { overlay: true })` with scroll support
 - Reads all memory files and formats them into a browsable view
-- `esc` or `ctrl+o` again to dismiss
+- `esc` or `ctrl+shift+o` again to dismiss
 
 ### Phase 4: Session dashboard on startup
 

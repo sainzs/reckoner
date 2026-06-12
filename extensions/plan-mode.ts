@@ -1,21 +1,10 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
-
-/**
- * Plan mode: switch between Plan (read-only) and Build (full tools).
- *
- * Inspired by OpenCode's Tab-to-switch pattern:
- * - Plan mode: disables edit/write tools, agent can only read and analyze
- * - Build mode: full tool access, agent can make changes
- *
- * This prevents premature edits and forces the agent to understand
- * before acting. Toggle with /plan or /build or Ctrl+T shortcut.
- */
+import type { InjectionBuildContext } from "./lib/lesson-types.js"
 
 type Mode = "build" | "plan"
 let currentMode: Mode = "build"
 
-const BUILD_TOOLS_BLOCKED = new Set<string>() // nothing blocked
-const PLAN_TOOLS_BLOCKED = new Set(["edit", "write"]) // block mutation tools
+const PLAN_TOOLS_BLOCKED = new Set(["edit", "write"])
 
 function getModeLabel(mode: Mode): string {
   return mode === "plan" ? "PLAN" : "BUILD"
@@ -43,20 +32,36 @@ function getModePrompt(mode: Mode): string {
   return ""
 }
 
+function emitMode(pi: ExtensionAPI) {
+  pi.events.emit("reckoner:mode-changed", { mode: currentMode, label: getModeLabel(currentMode) })
+}
+
 export default function planModeExtension(pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (_event: any, ctx: any) => {
     if (ctx.hasUI) {
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
     }
+    emitMode(pi)
 
     pi.events.emit("reckoner:register-injection", {
       key: "plan-mode",
       priority: 50,
-      build: () => getModePrompt(currentMode),
+      maxChars: 700,
+      build: (_context: InjectionBuildContext) => {
+        const text = getModePrompt(currentMode)
+        if (!text) return null
+        return {
+          key: "plan-mode",
+          text,
+          chars: text.length,
+          reason: `mode ${currentMode}`,
+          priority: 50,
+        }
+      },
     })
   })
 
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("tool_call", async (event: any) => {
     if (currentMode !== "plan") return
     if (PLAN_TOOLS_BLOCKED.has(event.toolName)) {
       return {
@@ -66,37 +71,39 @@ export default function planModeExtension(pi: ExtensionAPI) {
     }
   })
 
-  // Toggle shortcut
   pi.registerShortcut("ctrl+shift+t", {
     description: "Toggle between Plan and Build mode",
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
       currentMode = currentMode === "build" ? "plan" : "build"
       ctx.ui.notify(`Switched to ${currentMode.toUpperCase()} mode`, "info")
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
+      emitMode(pi)
     },
   })
 
   pi.registerCommand("plan", {
     description: "Switch to Plan mode (read-only, no edits)",
-    handler: async (_args, ctx) => {
+    handler: async (_args: string, ctx: any) => {
       currentMode = "plan"
       ctx.ui.notify("PLAN mode: edit and write tools are disabled. Analyze before building.", "info")
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
+      emitMode(pi)
     },
   })
 
   pi.registerCommand("build", {
     description: "Switch to Build mode (full tool access)",
-    handler: async (_args, ctx) => {
+    handler: async (_args: string, ctx: any) => {
       currentMode = "build"
       ctx.ui.notify("BUILD mode: full tool access enabled.", "info")
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
+      emitMode(pi)
     },
   })
 
   pi.registerCommand("mode", {
     description: "Show current mode or switch (plan/build)",
-    handler: async (args, ctx) => {
+    handler: async (args: string, ctx: any) => {
       const target = args.trim().toLowerCase()
       if (target === "plan" || target === "build") {
         currentMode = target as Mode
@@ -105,6 +112,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
         ctx.ui.notify(`Current mode: ${currentMode.toUpperCase()}\n\nUse /plan or /build to switch, or Ctrl+T to toggle.`, "info")
       }
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
+      emitMode(pi)
     },
   })
 }

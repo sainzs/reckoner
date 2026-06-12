@@ -3,31 +3,8 @@ import { Type } from "@sinclair/typebox"
 import { StringEnum } from "@mariozechner/pi-ai"
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs"
 import { join, dirname } from "node:path"
-
-/**
- * Tasks: structured planning that survives context compression and sessions.
- *
- * The agent can self-correct (auto-verify) and remember (memory), but it
- * can't externalize a structured plan. Complex multi-step work gets held
- * in context — fragile. This extension fixes that.
- *
- * File: .pi/tasks.md (per-project)
- * Format:
- *   # <title>
- *
- *   - [ ] Step 1
- *   - [x] Step 2
- *   - [ ] Step 3
- *
- * Two layers (same philosophy as memory):
- *   Storage  — full plan on disk, human-readable, editable
- *   Injection — terse summary in system prompt (title + progress + next step)
- *
- * Tool: tasks (actions: plan, check, add, view, done)
- * Injection: active task summary at before_agent_start
- */
-
-import { parsePlan, type TaskPlan } from "./lib/parse-plan.js"
+import { parsePlan, type TaskPlan, type TaskStep } from "./lib/parse-plan.js"
+import type { InjectionBuildContext, TaskState } from "./lib/lesson-types.js"
 
 const ACTIONS = ["plan", "check", "add", "view", "done"] as const
 
@@ -49,40 +26,42 @@ function formatPlan(plan: TaskPlan): string {
   return lines.join("\n") + "\n"
 }
 
-function statusSummary(plan: TaskPlan): string {
-  const total = plan.steps.length
-  const done = plan.steps.filter(s => s.checked).length
-  const next = plan.steps.find(s => !s.checked)
-  const lines = [
-    `**${plan.title}** — ${done}/${total} steps`,
-  ]
-  if (next) {
-    lines.push(`Next: ${next.text}`)
-  } else if (total > 0) {
-    lines.push("All steps complete.")
+function toTaskState(plan: TaskPlan | null): TaskState | null {
+  if (!plan || plan.steps.length === 0) return null
+  const done = plan.steps.filter((step: TaskStep) => step.checked).length
+  const remaining = plan.steps.filter((step: TaskStep) => !step.checked).map((step: TaskStep) => step.text)
+  return {
+    title: plan.title,
+    done,
+    total: plan.steps.length,
+    nextStep: remaining[0],
+    remainingSteps: remaining,
   }
-  return lines.join("\n")
 }
 
-function injectionSummary(plan: TaskPlan): string {
-  const total = plan.steps.length
-  const done = plan.steps.filter(s => s.checked).length
-  const remaining = plan.steps.filter(s => !s.checked)
+function statusSummary(plan: TaskPlan): string {
+  const state = toTaskState(plan)
+  if (!state) return "No active plan."
+  return [
+    `**${state.title}** — ${state.done}/${state.total} steps`,
+    state.nextStep ? `Next: ${state.nextStep}` : "All steps complete.",
+  ].join("\n")
+}
 
+function injectionSummary(state: TaskState): string {
   const lines = [
-    `## Active task`,
+    "## Active task",
     "",
-    `**${plan.title}** (${done}/${total} complete)`,
+    `**${state.title}** (${state.done}/${state.total} complete)`,
   ]
 
-  if (remaining.length > 0) {
-    lines.push("")
-    lines.push("Remaining:")
-    for (const step of remaining.slice(0, 5)) {
-      lines.push(`- [ ] ${step.text}`)
+  if (state.remainingSteps.length > 0) {
+    lines.push("", "Remaining:")
+    for (const step of state.remainingSteps.slice(0, 5)) {
+      lines.push(`- [ ] ${step}`)
     }
-    if (remaining.length > 5) {
-      lines.push(`  ...and ${remaining.length - 5} more`)
+    if (state.remainingSteps.length > 5) {
+      lines.push(`  ...and ${state.remainingSteps.length - 5} more`)
     }
   } else {
     lines.push("", "All steps complete — mark done with tasks(action: 'done') or continue.")
@@ -92,37 +71,56 @@ function injectionSummary(plan: TaskPlan): string {
 }
 
 export default function tasksExtension(pi: ExtensionAPI) {
-  let cwd: string = ""
+  let cwd = ""
+  let activeTask: TaskState | null = null
 
-  pi.on("session_start", async (_event, ctx) => {
-    cwd = ctx.cwd
+  function emitTaskState() {
+    pi.events.emit("reckoner:task-updated", activeTask)
+  }
+
+  function refreshFromDisk() {
     const file = tasksFile(cwd)
-    if (ctx.hasUI) {
-      if (existsSync(file)) {
-        const content = readFileSync(file, "utf8").trim()
-        const plan = content ? parsePlan(content) : null
-        if (plan && plan.steps.length > 0) {
-          const done = plan.steps.filter(s => s.checked).length
-          ctx.ui.setStatus("tasks", `TASK ${done}/${plan.steps.length}`)
-        } else {
-          ctx.ui.setStatus("tasks", "TASK NONE")
-        }
-      } else {
-        ctx.ui.setStatus("tasks", "TASK NONE")
-      }
+    if (!existsSync(file)) {
+      activeTask = null
+      emitTaskState()
+      return null
     }
+
+    const content = readFileSync(file, "utf8")
+    const plan = parsePlan(content)
+    activeTask = toTaskState(plan)
+    emitTaskState()
+    return plan
+  }
+
+  function updateUi(ctx: any) {
+    if (!ctx.hasUI) return
+    if (!activeTask) {
+      ctx.ui.setStatus("tasks", "TASK NONE")
+      return
+    }
+    ctx.ui.setStatus("tasks", `TASK ${activeTask.done}/${activeTask.total}`)
+  }
+
+  pi.on("session_start", async (_event: any, ctx: any) => {
+    cwd = ctx.cwd
+    refreshFromDisk()
+    updateUi(ctx)
 
     pi.events.emit("reckoner:register-injection", {
       key: "tasks",
       priority: 30,
-      build: () => {
-        const f = tasksFile(cwd)
-        if (!existsSync(f)) return ""
-        const content = readFileSync(f, "utf8")
-        const plan = parsePlan(content)
-        if (!plan || plan.steps.length === 0) return ""
-        if (!plan.steps.some(s => !s.checked)) return ""
-        return `\n\n---\n${injectionSummary(plan)}\n---`
+      maxChars: 900,
+      build: (_context: InjectionBuildContext) => {
+        if (!activeTask) return null
+        const text = `\n\n---\n${injectionSummary(activeTask)}\n---`
+        return {
+          key: "tasks",
+          text,
+          chars: text.length,
+          reason: activeTask.nextStep ? `next step: ${activeTask.nextStep}` : "active task",
+          priority: 30,
+        }
       },
     })
   })
@@ -150,212 +148,150 @@ export default function tasksExtension(pi: ExtensionAPI) {
       action: StringEnum([...ACTIONS], {
         description: "plan=create new plan, check=mark step done, add=add step, view=show status, done=clear plan",
       }),
-      title: Type.Optional(Type.String({
-        description: "Plan title (required for 'plan' action)",
-      })),
-      steps: Type.Optional(Type.Array(Type.String(), {
-        description: "List of steps (required for 'plan' action)",
-      })),
-      step: Type.Optional(Type.String({
-        description: "Step text — for 'check' (matches partially) or 'add' (new step text)",
-      })),
+      title: Type.Optional(Type.String({ description: "Plan title (required for 'plan' action)" })),
+      steps: Type.Optional(Type.Array(Type.String(), { description: "List of steps (required for 'plan' action)" })),
+      step: Type.Optional(Type.String({ description: "Step text — for 'check' (matches partially) or 'add' (new step text)" })),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId: string, params: any) {
       const file = tasksFile(cwd)
       const action = params.action as typeof ACTIONS[number]
 
       if (action === "plan") {
         if (!params.title || !params.steps || params.steps.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: "Error: 'plan' action requires title and steps." }],
-          }
+          return { content: [{ type: "text" as const, text: "Error: 'plan' action requires title and steps." }] }
         }
 
         const plan: TaskPlan = {
           title: params.title,
-          steps: params.steps.map(s => ({ text: s, checked: false })),
+          steps: params.steps.map((step: string) => ({ text: step, checked: false })),
         }
-
         ensureDir(file)
         writeFileSync(file, formatPlan(plan), "utf8")
-
+        activeTask = toTaskState(plan)
+        emitTaskState()
         return {
-          content: [{
-            type: "text" as const,
-            text: `Plan created: ${plan.title}\n\n${plan.steps.map(s => `- [ ] ${s.text}`).join("\n")}`,
-          }],
+          content: [{ type: "text" as const, text: `Plan created: ${plan.title}\n\n${plan.steps.map((step: TaskStep) => `- [ ] ${step.text}`).join("\n")}` }],
           details: { file, steps: plan.steps.length },
         }
       }
 
       if (action === "check") {
         if (!params.step) {
-          return {
-            content: [{ type: "text" as const, text: "Error: 'check' action requires step text." }],
-          }
+          return { content: [{ type: "text" as const, text: "Error: 'check' action requires step text." }] }
         }
-
         if (!existsSync(file)) {
-          return {
-            content: [{ type: "text" as const, text: "No active plan. Create one with action: 'plan'." }],
-          }
+          return { content: [{ type: "text" as const, text: "No active plan. Create one with action: 'plan'." }] }
         }
 
         const plan = parsePlan(readFileSync(file, "utf8"))
         if (!plan) {
-          return {
-            content: [{ type: "text" as const, text: "Could not parse plan file." }],
-          }
+          return { content: [{ type: "text" as const, text: "Could not parse plan file." }] }
         }
 
-        const query = params.step.toLowerCase()
-        const match = plan.steps.find(s => !s.checked && s.text.toLowerCase().includes(query))
-
+        const query = String(params.step).toLowerCase()
+        const match = plan.steps.find((step: TaskStep) => !step.checked && step.text.toLowerCase().includes(query))
         if (!match) {
-          const unchecked = plan.steps.filter(s => !s.checked).map(s => s.text)
+          const unchecked = plan.steps.filter((step: TaskStep) => !step.checked).map((step: TaskStep) => step.text)
           return {
-            content: [{
-              type: "text" as const,
-              text: `No unchecked step matching "${params.step}".\n\nRemaining:\n${unchecked.map(s => `- [ ] ${s}`).join("\n") || "(none)"}`,
-            }],
+            content: [{ type: "text" as const, text: `No unchecked step matching "${params.step}".\n\nRemaining:\n${unchecked.map((step: string) => `- [ ] ${step}`).join("\n") || "(none)"}` }],
           }
         }
 
         match.checked = true
         writeFileSync(file, formatPlan(plan), "utf8")
-
-        const done = plan.steps.filter(s => s.checked).length
+        activeTask = toTaskState(plan)
+        emitTaskState()
         return {
-          content: [{
-            type: "text" as const,
-            text: `COMPLETE: ${match.text}\n\n${statusSummary(plan)}`,
-          }],
-          details: { checked: match.text, progress: `${done}/${plan.steps.length}` },
+          content: [{ type: "text" as const, text: `COMPLETE: ${match.text}\n\n${statusSummary(plan)}` }],
+          details: { checked: match.text, progress: `${activeTask?.done ?? 0}/${activeTask?.total ?? plan.steps.length}` },
         }
       }
 
       if (action === "add") {
         if (!params.step) {
-          return {
-            content: [{ type: "text" as const, text: "Error: 'add' action requires step text." }],
-          }
+          return { content: [{ type: "text" as const, text: "Error: 'add' action requires step text." }] }
         }
-
         if (!existsSync(file)) {
-          return {
-            content: [{ type: "text" as const, text: "No active plan. Create one with action: 'plan'." }],
-          }
+          return { content: [{ type: "text" as const, text: "No active plan. Create one with action: 'plan'." }] }
         }
 
         const plan = parsePlan(readFileSync(file, "utf8"))
         if (!plan) {
-          return {
-            content: [{ type: "text" as const, text: "Could not parse plan file." }],
-          }
+          return { content: [{ type: "text" as const, text: "Could not parse plan file." }] }
         }
 
         plan.steps.push({ text: params.step, checked: false })
         writeFileSync(file, formatPlan(plan), "utf8")
-
+        activeTask = toTaskState(plan)
+        emitTaskState()
         return {
-          content: [{
-            type: "text" as const,
-            text: `Added: ${params.step}\n\n${statusSummary(plan)}`,
-          }],
+          content: [{ type: "text" as const, text: `Added: ${params.step}\n\n${statusSummary(plan)}` }],
           details: { added: params.step, total: plan.steps.length },
         }
       }
 
       if (action === "view") {
         if (!existsSync(file)) {
-          return {
-            content: [{ type: "text" as const, text: "No active plan." }],
-          }
+          return { content: [{ type: "text" as const, text: "No active plan." }] }
         }
 
         const plan = parsePlan(readFileSync(file, "utf8"))
         if (!plan || plan.steps.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: "No active plan." }],
-          }
+          return { content: [{ type: "text" as const, text: "No active plan." }] }
         }
 
-        const full = plan.steps.map(s => {
-          const mark = s.checked ? "x" : " "
-          return `- [${mark}] ${s.text}`
-        }).join("\n")
-
         return {
-          content: [{
-            type: "text" as const,
-            text: `# ${plan.title}\n\n${full}\n\n${statusSummary(plan)}`,
-          }],
+          content: [{ type: "text" as const, text: `# ${plan.title}\n\n${plan.steps.map((step: TaskStep) => `- [${step.checked ? "x" : " "}] ${step.text}`).join("\n")}\n\n${statusSummary(plan)}` }],
           details: {
             title: plan.title,
             total: plan.steps.length,
-            done: plan.steps.filter(s => s.checked).length,
+            done: plan.steps.filter((step: TaskStep) => step.checked).length,
           },
         }
       }
 
       if (action === "done") {
         if (!existsSync(file)) {
-          return {
-            content: [{ type: "text" as const, text: "No active plan to complete." }],
-          }
+          return { content: [{ type: "text" as const, text: "No active plan to complete." }] }
         }
 
         const plan = parsePlan(readFileSync(file, "utf8"))
         const title = plan?.title ?? "task"
-
-        // Archive: rename to tasks-done.md with timestamp, then remove active
         const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ")
         const archiveFile = join(cwd, ".pi", "tasks-done.md")
         const archiveEntry = `\n## ${timestamp} — ${title}\nCompleted.\n`
         const existing = existsSync(archiveFile) ? readFileSync(archiveFile, "utf8") : ""
         writeFileSync(archiveFile, existing + archiveEntry, "utf8")
-
-        // Remove the active plan
         try { unlinkSync(file) } catch {}
-
+        activeTask = null
+        emitTaskState()
         return {
-          content: [{
-            type: "text" as const,
-            text: `Task "${title}" marked done and archived.`,
-          }],
+          content: [{ type: "text" as const, text: `Task "${title}" marked done and archived.` }],
           details: { archived: title },
         }
       }
 
-      return {
-        content: [{ type: "text" as const, text: `Unknown action: ${action}` }],
-      }
+      return { content: [{ type: "text" as const, text: `Unknown action: ${action}` }] }
     },
   })
 
   pi.registerCommand("task", {
     description: "Show current task status",
-    handler: async (_args, ctx) => {
-      const file = tasksFile(ctx.cwd)
-      if (!existsSync(file)) {
+    handler: async (_args: string, ctx: any) => {
+      refreshFromDisk()
+      updateUi(ctx)
+      if (!activeTask) {
         ctx.ui.notify("No active task. Use tasks(action: 'plan') to create one.", "info")
         return
       }
 
-      const plan = parsePlan(readFileSync(file, "utf8"))
-      if (!plan || plan.steps.length === 0) {
-        ctx.ui.notify("No active task.", "info")
-        return
-      }
-
-      const lines = [`# ${plan.title}`, ""]
-      for (const step of plan.steps) {
-        const mark = step.checked ? "[x]" : "[ ]"
-        lines.push(`  ${mark} ${step.text}`)
-      }
-      const done = plan.steps.filter(s => s.checked).length
-      lines.push("", `  ${done}/${plan.steps.length} complete`)
-
+      const lines = [
+        `# ${activeTask.title}`,
+        "",
+        ...activeTask.remainingSteps.map((step: string) => `  [ ] ${step}`),
+        "",
+        `  ${activeTask.done}/${activeTask.total} complete`,
+      ]
       ctx.ui.notify(lines.join("\n"), "info")
     },
   })

@@ -1,127 +1,163 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import type { AssistantMessage } from "@mariozechner/pi-ai"
 import { truncateToWidth } from "@mariozechner/pi-tui"
+import type { NvimStatusPayload, TaskState, VerifyResult, VerifyStatusPayload, WorkspaceState } from "./lib/lesson-types.js"
 
 /**
- * Harness footer: unified status line replacing scattered setStatus calls.
+ * Harness footer: calm system heartbeat.
  *
- * Layout:
- *   main │ VERIFY READY │ NVIM READY │ BUILD │ turn 3 │ ↑12.3k ↓2.1k $0.042
+ * Visibility policy — each segment earns its place:
+ *   branch    — always (you always need to know where you are)
+ *   dirty     — when uncommitted changes exist
+ *   mode      — ONLY when in plan mode (build is the default; silence = build)
+ *   verify    — ONLY when there are new issues (silence = clean)
+ *   code intel — ONLY when broken (silence = working)
+ *   task      — ONLY when there is an active incomplete task
+ *   cost      — when non-zero (financial awareness)
  *
- * Consolidates status from: workspace-context, auto-verify, nvim-server,
- * plan-mode, git-checkpoint. Adds token usage and cost from session data.
- *
- * Uses ctx.ui.setFooter() with footerData for git branch reactivity.
- * Toggle with /footer command.
+ * Token counts are omitted — they live in /metrics, not the footer.
  */
+
+interface FooterState {
+  workspace?: WorkspaceState
+  verify?: VerifyStatusPayload & { introducedCount: number, resolvedCount: number }
+  nvim?: NvimStatusPayload
+  mode?: { mode: "plan" | "build" }
+  task?: TaskState | null
+  usage?: { cost: number }
+}
 
 export default function harnessFooterExtension(pi: ExtensionAPI) {
   let enabled = true
-  let turnCount = 0
-  let nvimReady = false
+  const state: FooterState = {}
 
-  // Track nvim server state
-  pi.events.on("reckoner:nvim-ready", () => { nvimReady = true })
+  function updateUsage(ctx: any) {
+    let cost = 0
+    try {
+      for (const entry of ctx.sessionManager.getBranch()) {
+        if (entry.type === "message" && entry.message.role === "assistant") {
+          const m = entry.message as AssistantMessage
+          cost += m.usage?.cost?.total ?? 0
+        }
+      }
+    } catch {}
+    state.usage = { cost }
+  }
 
-  pi.on("turn_start", async () => { turnCount++ })
-
-  pi.on("session_start", async (_event, ctx) => {
+  function refresh(ctx: any) {
     if (!ctx.hasUI || !enabled) return
-    turnCount = 0
-    applyFooter(ctx)
-  })
-
-  // Refresh footer after turns to update token counts
-  pi.on("turn_end", async (_event, ctx) => {
-    if (!ctx.hasUI || !enabled) return
-    applyFooter(ctx)
-  })
-
-  function applyFooter(ctx: any) {
     ctx.ui.setFooter((tui: any, theme: any, footerData: any) => {
       const unsub = footerData.onBranchChange(() => tui.requestRender())
-
       return {
         dispose: unsub,
         invalidate() {},
         render(width: number): string[] {
           const parts: string[] = []
+          const sep = theme.fg("dim", "  ·  ")
 
-          // Git branch
-          const branch = footerData.getGitBranch()
+          // Branch — always show
+          const branch = state.workspace?.branch || footerData.getGitBranch()
           if (branch) {
-            parts.push(theme.fg("dim", branch))
+            const dirty = state.workspace?.dirtyCount ?? 0
+            const label = dirty > 0 ? `${branch} · ${dirty} changes` : branch
+            parts.push(theme.fg("dim", label))
           }
 
-          // Collect extension statuses from footerData
-          const statuses: Map<string, string> = footerData.getExtensionStatuses()
-
-          // Verify status
-          const verify = statuses.get("verify")
-          if (verify) {
-            const color = verify.includes("ISSUES") ? "warning"
-              : verify.includes("RUNNING") ? "accent"
-              : verify.includes("READY") ? "success"
-              : verify.includes("OFF") ? "dim"
-              : "dim"
-            parts.push(theme.fg(color, verify))
+          // Mode — only when plan (build is silent default)
+          if (state.mode?.mode === "plan") {
+            parts.push(theme.fg("accent", "plan mode"))
           }
 
-          // Nvim status
-          const nvim = statuses.get("nvim-server") || statuses.get("nvim")
-          if (nvim) {
-            const color = nvim.includes("READY") || nvim.includes("REUSED") ? "success"
-              : nvim.includes("STARTING") ? "accent"
-              : nvim.includes("UNAVAILABLE") || nvim.includes("MISSING") || nvim.includes("TIMEOUT") || nvim.includes("FAILED")
-                ? "warning"
-                : "dim"
-            parts.push(theme.fg(color, nvim))
+          // Verify — only when there are new issues
+          if (state.verify && state.verify.introducedCount > 0) {
+            const n = state.verify.introducedCount
+            const r = state.verify.resolvedCount
+            const fixed = r > 0 ? `, ${r} fixed` : ""
+            parts.push(theme.fg("warning", `${n} new issue${n === 1 ? "" : "s"}${fixed}`))
+          } else if (state.verify?.level === "off") {
+            parts.push(theme.fg("dim", "verify off"))
           }
 
-          // Plan/build mode
-          const mode = statuses.get("mode")
-          if (mode) {
-            parts.push(theme.fg("accent", mode))
+          // Code intel — only when NOT working
+          if (state.nvim && !state.nvim.ready) {
+            const label = state.nvim.label.replace(/^NVIM\s*/i, "").toLowerCase()
+            parts.push(theme.fg("warning", `code intel ${label}`))
           }
 
-          // Turn count (if agent is running)
-          if (turnCount > 0) {
-            parts.push(theme.fg("dim", `turn ${turnCount}`))
+          // Task — only when active and incomplete
+          if (state.task && state.task.done < state.task.total) {
+            const remaining = state.task.total - state.task.done
+            const label = remaining === 1 ? "1 step left" : `${remaining} steps left`
+            parts.push(theme.fg("dim", label))
           }
 
-          // Token usage from session
-          let input = 0, output = 0, cost = 0
-          try {
-            for (const e of ctx.sessionManager.getBranch()) {
-              if (e.type === "message" && e.message.role === "assistant") {
-                const m = e.message as AssistantMessage
-                input += m.usage?.input ?? 0
-                output += m.usage?.output ?? 0
-                cost += m.usage?.cost?.total ?? 0
-              }
-            }
-          } catch {}
-
-          if (input > 0 || output > 0) {
-            const fmt = (n: number) => n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`
-            parts.push(theme.fg("dim", `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}`))
+          // Cost — only when non-zero
+          if (state.usage && state.usage.cost > 0) {
+            parts.push(theme.fg("dim", `$${state.usage.cost.toFixed(2)}`))
           }
 
-          // Join with separator, handle truncation
-          const sep = theme.fg("dim", " │ ")
-          const line = parts.join(sep)
-          return [truncateToWidth(line, width)]
+          if (parts.length === 0) return [""]
+          return [truncateToWidth(parts.join(sep), width)]
         },
       }
     })
   }
 
+  pi.events.on("reckoner:workspace-updated", (workspace: WorkspaceState) => {
+    state.workspace = workspace
+  })
+
+  pi.events.on("reckoner:verify-status", (verify: VerifyStatusPayload) => {
+    state.verify = { ...verify, introducedCount: 0, resolvedCount: 0 }
+  })
+
+  pi.events.on("reckoner:verify-result", (result: VerifyResult) => {
+    const introduced = result.introduced.length + result.testFailures.length
+    const resolved = result.resolved.length
+    state.verify = {
+      ...(state.verify ?? {
+        label: introduced > 0 ? "VERIFY ISSUES" : "VERIFY READY",
+        level: introduced > 0 ? "issues" : "ready",
+        severity: introduced > 0 ? "warn" : "ok",
+        summary: { introduced, resolved, touchedFiles: result.touchedFiles.length },
+      }),
+      introducedCount: introduced,
+      resolvedCount: resolved,
+    }
+  })
+
+  pi.events.on("reckoner:nvim-status", (nvim: NvimStatusPayload) => {
+    state.nvim = nvim
+  })
+
+  pi.events.on("reckoner:mode-changed", (mode: any) => {
+    state.mode = mode
+  })
+
+  pi.events.on("reckoner:task-updated", (task: TaskState | null) => {
+    state.task = task
+  })
+
+  pi.on("session_start", async (_event: any, ctx: any) => {
+    updateUsage(ctx)
+    refresh(ctx)
+  })
+
+  pi.on("turn_end", async (_event: any, ctx: any) => {
+    updateUsage(ctx)
+    refresh(ctx)
+  })
+
   pi.registerCommand("footer", {
     description: "Toggle custom footer on/off",
-    handler: async (_args, ctx) => {
-      enabled = !enabled
+    handler: async (args: string, ctx: any) => {
+      const mode = args.trim().toLowerCase()
+      if (mode === "off") enabled = false
+      else if (mode === "on") enabled = true
+      else enabled = !enabled
+
       if (enabled) {
-        applyFooter(ctx)
+        refresh(ctx)
         ctx.ui.notify("Custom footer enabled", "info")
       } else {
         ctx.ui.setFooter(undefined)

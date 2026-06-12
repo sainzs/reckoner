@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
+import type { InjectionBuildContext } from "./lib/lesson-types.js"
 
 /**
  * Principles: injects behavioral guidelines before every agent run.
@@ -43,7 +44,14 @@ export default function principlesExtension(pi: ExtensionAPI) {
     pi.events.emit("reckoner:register-injection", {
       key: "principles",
       priority: 10,
-      build: () => `\n\n${PRINCIPLES}`,
+      maxChars: 1200,
+      build: (_context: InjectionBuildContext) => ({
+        key: "principles",
+        text: `\n\n${PRINCIPLES}`,
+        chars: PRINCIPLES.length + 2,
+        reason: "base operating principles",
+        priority: 10,
+      }),
     })
   })
 }

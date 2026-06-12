@@ -63,24 +63,48 @@ The loop is the thesis. These are the organs that support it:
 ## Install
 
 ```bash
-# Add to your pi settings (~/.pi/agent/settings.json)
-{
-  "packages": ["~/Code/reckoner"]
-}
+pi install git:github.com/sainzs/reckoner
 ```
+
+That's it. Pi clones the repo, runs `npm install`, and loads everything.
 
 ### Requirements
 
-- [pi](https://github.com/mariozechner/pi-coding-agent) — the agent runtime
-- [neovim](https://neovim.io/) 0.10+ — with treesitter parsers and LSP servers configured
-- `rg` (ripgrep), `fd` — for codebase scanning
-- `JINA_API_KEY` — for web search ([free tier](https://jina.ai/reader))
+| Requirement | Why |
+|---|---|
+| [pi](https://github.com/mariozechner/pi-coding-agent) 0.64+ | the agent runtime |
+| [neovim](https://neovim.io/) 0.10+ | LSP diagnostics, treesitter symbols, code intelligence |
+| `rg` (ripgrep) | codebase scanning |
+| `fd` | file discovery |
+| `JINA_API_KEY` | web search — [free tier](https://jina.ai/reader) |
 
-### First run
+### First-time neovim setup
+
+Reckoner uses a headless neovim instance for real LSP diagnostics. The first time
+you use it, install treesitter parsers for your languages:
 
 ```bash
-# Install treesitter parsers for languages you work with
 nvim --headless +"TSInstall typescript javascript python lua go rust" +"sleep 20" +"qa"
+```
+
+Also make sure language servers are on your PATH (`ts_ls`, `pyright`, `gopls`, etc.).
+
+### Try before installing
+
+```bash
+pi -e git:github.com/sainzs/reckoner
+```
+
+Installs to a temp directory for that run only.
+
+### Develop locally
+
+```bash
+git clone https://github.com/sainzs/reckoner
+cd reckoner
+npm install
+npm run verify:self   # typecheck + tests
+pi install ./reckoner  # or add to ~/.pi/agent/settings.json
 ```
 
 ## Usage
@@ -103,12 +127,19 @@ Reckoner loads automatically.
 
 | Command | What it does |
 |---------|-------------|
-| `/plan` | Read-only mode. Agent can't edit. |
-| `/build` | Full mode. Agent can edit. |
+| `/plan` | Switch to read-only mode. Agent can read but not edit. |
+| `/build` | Switch to full mode. Agent can edit. |
 | `/undo` | Restore last git checkpoint. |
-| `/verify` | Toggle auto-verification or check status. |
-| `/memory` | Show what the agent remembers. |
-| `/task` | Show current task plan status. |
+| `/verify` | Toggle verification. Sub-commands: `run`, `last`, `baseline`. |
+| `/memory` | Show what the agent remembers. `recent` for last entries. |
+| `/lessons` | Inspect stored lessons. Sub-commands: `repeated`, `unresolved`, `promoted`, `file <path>`. |
+| `/metrics` | Show learning-loop metrics. Sub-commands: `recent`, `repeated`. |
+| `/orient` | Open orientation overlay (also `Ctrl+Shift+O`). |
+| `/inject` | Show last prompt injection trace and budget. |
+| `/task` | Show current task plan. |
+| `/tone` | Switch theme. Options: `dusk`, `factory`. |
+| `/snapshot` | Refresh and show workspace context. |
+| `/guardrails` | Show or toggle safety guardrails. |
 
 ### Tools
 

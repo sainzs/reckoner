@@ -5,6 +5,23 @@
   "keywords": ["pi-package", "coding-agent", "pi"],
   "author": "sainzs",
   "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run test:unit",
+    "test:unit": "tsx --test tests/**/*.test.ts",
+    "verify:self": "npm run typecheck && npm run test:unit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
   "pi": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
