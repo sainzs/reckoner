@@ -25,6 +25,8 @@ import { writeFileSync, mkdtempSync, unlinkSync } from "node:fs"
 const RECKONER_NVIM_INIT = resolve(process.env.HOME ?? "~", "Code/reckoner/nvim/init.lua")
 const NVIM_TIMEOUT = 25_000
 const LSP_WAIT_SECS = 15
+const SERVER_POLL_INTERVAL = 300 // ms
+const SERVER_POLL_MAX = 30 // attempts (9 seconds max)
 
 function nvimArgs(file: string): string[] {
   return [
@@ -41,6 +43,8 @@ function writeLuaScript(code: string): string {
   return path
 }
 
+// ─── Spawn path (slow fallback) ─────────────────────────────
+
 async function runNvimLua(
   pi: ExtensionAPI,
   file: string,
@@ -52,6 +56,64 @@ async function runNvimLua(
     const args = [...nvimArgs(file), "-c", `luafile ${scriptPath}`]
     const result = await pi.exec("nvim", args, { timeout: NVIM_TIMEOUT, signal })
     return (result.stdout ?? "").trim()
+  } finally {
+    try { unlinkSync(scriptPath) } catch {}
+  }
+}
+
+// ─── Server path (fast, persistent nvim) ─────────────────────
+
+/**
+ * Execute a Lua script on the persistent nvim server.
+ * Pattern: write Lua to temp file → luafile via server → poll vim.g._reckoner_result
+ *
+ * The Lua script MUST set vim.g._reckoner_result to a JSON string when done.
+ */
+async function runOnServer(
+  pi: ExtensionAPI,
+  socket: string,
+  file: string,
+  luaCode: string,
+  maxPoll: number = SERVER_POLL_MAX,
+): Promise<string | null> {
+  const scriptPath = writeLuaScript(luaCode)
+  try {
+    // Clear previous result
+    await pi.exec("nvim", [
+      "--server", socket,
+      "--remote-expr", `execute("let g:_reckoner_result = ''")`,
+    ], { timeout: 3000 })
+
+    // Open the file
+    const escaped = file.replace(/"/g, '\\"')
+    await pi.exec("nvim", [
+      "--server", socket,
+      "--remote-expr", `execute("edit ${escaped}")`,
+    ], { timeout: 5000 })
+
+    // Execute the Lua script
+    await pi.exec("nvim", [
+      "--server", socket,
+      "--remote-expr", `execute("luafile ${scriptPath}")`,
+    ], { timeout: 5000 })
+
+    // Poll for result
+    for (let i = 0; i < maxPoll; i++) {
+      await new Promise(r => setTimeout(r, SERVER_POLL_INTERVAL))
+
+      const result = await pi.exec("nvim", [
+        "--server", socket,
+        "--remote-expr", "g:_reckoner_result",
+      ], { timeout: 3000 })
+
+      const raw = (result.stdout ?? "").trim()
+      if (raw && raw !== "" && raw !== "0") {
+        return raw
+      }
+    }
+    return null // timeout
+  } catch {
+    return null // server error
   } finally {
     try { unlinkSync(scriptPath) } catch {}
   }
@@ -238,6 +300,154 @@ timer:start(1000, 500, vim.schedule_wrap(function()
 end))
 `
 
+// ─── Server Lua scripts ─────────────────────────────────────
+// These store results in vim.g._reckoner_result (JSON) instead of stdout.
+
+const SERVER_LUA_DIAGNOSTICS = `
+local attempts = 0
+local timer = vim.uv.new_timer()
+timer:start(1000, 1000, vim.schedule_wrap(function()
+  attempts = attempts + 1
+  local diags = vim.diagnostic.get(0)
+  if #diags > 0 or attempts > 12 then
+    timer:stop()
+    timer:close()
+    local clients = vim.lsp.get_clients({ bufnr = 0 })
+    local out = {}
+    for _, c in ipairs(clients) do
+      table.insert(out, "LSP: " .. c.name)
+    end
+    if #diags == 0 then
+      table.insert(out, "No diagnostics found.")
+    end
+    for _, d in ipairs(diags) do
+      local sev = ({ "ERROR", "WARN", "INFO", "HINT" })[d.severity] or "?"
+      table.insert(out, string.format("[%s] L%d: %s", sev, d.lnum + 1, d.message:sub(1, 200)))
+    end
+    vim.g._reckoner_result = table.concat(out, "\\n")
+  end
+end))
+`
+
+const SERVER_LUA_SYMBOLS = `
+vim.schedule(function()
+  local ok, parser = pcall(vim.treesitter.get_parser, 0)
+  if not ok or not parser then
+    vim.g._reckoner_result = "ERROR: treesitter parser not available"
+    return
+  end
+  local tree = parser:parse()[1]
+  local root = tree:root()
+  local out = {}
+  local function walk(node, depth)
+    local t = node:type()
+    local decl_types = {
+      function_declaration=true, method_definition=true, arrow_function=true,
+      class_declaration=true, interface_declaration=true, type_alias_declaration=true,
+      enum_declaration=true, export_statement=true, lexical_declaration=true,
+      variable_declaration=true, function_definition=true, class_definition=true,
+      struct_item=true, enum_item=true, impl_item=true, trait_item=true,
+      func_literal=true, type_declaration=true, method_declaration=true,
+    }
+    if decl_types[t] or (depth == 0) then
+      if depth > 0 then
+        local text = vim.treesitter.get_node_text(node, 0)
+        local first = text:match("^([^\\n]+)")
+        if first then
+          local row = node:start()
+          local indent = string.rep("  ", math.min(depth - 1, 4))
+          table.insert(out, string.format("%sL%d %s | %s", indent, row + 1, t, first:sub(1, 120):gsub("%s+", " ")))
+        end
+      end
+      for child in node:iter_children() do
+        walk(child, depth + 1)
+      end
+    end
+  end
+  walk(root, 0)
+  vim.g._reckoner_result = #out > 0 and table.concat(out, "\\n") or "No declarations found."
+end)
+`
+
+function serverLuaDefinition(line: number, col: number): string {
+  return `
+vim.schedule(function()
+  local clients = vim.lsp.get_clients({ bufnr = 0 })
+  if #clients == 0 then
+    vim.g._reckoner_result = "ERROR: no LSP client attached"
+    return
+  end
+  vim.api.nvim_win_set_cursor(0, {${line}, ${col}})
+  vim.lsp.buf.definition({
+    on_list = function(options)
+      local items = options.items or {}
+      if #items == 0 then
+        vim.g._reckoner_result = "No definition found."
+      else
+        local out = {}
+        for _, item in ipairs(items) do
+          table.insert(out, string.format("%s:%d:%d | %s",
+            item.filename or "?", item.lnum or 0, item.col or 0, (item.text or ""):sub(1, 150)))
+        end
+        vim.g._reckoner_result = table.concat(out, "\\n")
+      end
+    end
+  })
+  vim.defer_fn(function()
+    if not vim.g._reckoner_result or vim.g._reckoner_result == "" then
+      vim.g._reckoner_result = "Definition request timed out."
+    end
+  end, 5000)
+end)
+`
+}
+
+function serverLuaReferences(line: number, col: number): string {
+  return `
+vim.schedule(function()
+  local clients = vim.lsp.get_clients({ bufnr = 0 })
+  if #clients == 0 then
+    vim.g._reckoner_result = "ERROR: no LSP client attached"
+    return
+  end
+  vim.api.nvim_win_set_cursor(0, {${line}, ${col}})
+  vim.lsp.buf.references(nil, {
+    on_list = function(options)
+      local items = options.items or {}
+      if #items == 0 then
+        vim.g._reckoner_result = "No references found."
+      else
+        local out = {}
+        for _, item in ipairs(items) do
+          table.insert(out, string.format("%s:%d | %s",
+            item.filename or "?", item.lnum or 0, (item.text or ""):sub(1, 150)))
+        end
+        vim.g._reckoner_result = table.concat(out, "\\n")
+      end
+    end
+  })
+  vim.defer_fn(function()
+    if not vim.g._reckoner_result or vim.g._reckoner_result == "" then
+      vim.g._reckoner_result = "References request timed out."
+    end
+  end, 5000)
+end)
+`
+}
+
+const SERVER_LUA_FORMAT = `
+vim.schedule(function()
+  local clients = vim.lsp.get_clients({ bufnr = 0 })
+  if #clients == 0 then
+    vim.g._reckoner_result = "ERROR: no LSP client attached"
+    return
+  end
+  vim.lsp.buf.format({ async = false, timeout_ms = 10000 })
+  vim.cmd("write")
+  vim.g._reckoner_result = "Formatted and saved."
+end)
+`
+
 // ─── Extension ──────────────────────────────────────────────
 
 export default function nvimToolsExtension(pi: ExtensionAPI) {
@@ -247,57 +457,6 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
   pi.events.on("reckoner:nvim-ready", (data: any) => {
     if (data?.socket) nvimServerSocket = data.socket
   })
-
-  /** Fast diagnostics via persistent server. Returns formatted output or null if unavailable. */
-  async function getDiagnosticsViaServer(file: string): Promise<string | null> {
-    if (!nvimServerSocket) return null
-    try {
-      // Open file in server
-      await pi.exec("nvim", [
-        "--server", nvimServerSocket,
-        "--remote-expr", `execute("edit ${file.replace(/"/g, '\\\\"')}")`,
-      ], { timeout: 5000 })
-
-      // Poll for diagnostics
-      for (let i = 0; i < LSP_WAIT_SECS; i++) {
-        await new Promise(r => setTimeout(r, 1000))
-        const result = await pi.exec("nvim", [
-          "--server", nvimServerSocket,
-          "--remote-expr",
-          `luaeval("vim.json.encode(vim.tbl_map(function(d) return {s=d.severity, l=d.lnum+1, m=d.message:sub(1,200)} end, vim.diagnostic.get(0)))")`,
-        ], { timeout: 5000 })
-
-        const raw = (result.stdout ?? "").trim()
-        if (!raw || raw === "[]" || raw === "null") continue
-
-        try {
-          const diags = JSON.parse(raw) as { s: number, l: number, m: string }[]
-          if (diags.length > 0) {
-            // Get LSP client info
-            let lspInfo = ""
-            try {
-              const clientResult = await pi.exec("nvim", [
-                "--server", nvimServerSocket,
-                "--remote-expr",
-                `luaeval("vim.json.encode(vim.tbl_map(function(c) return c.name end, vim.lsp.get_clients({bufnr=0})))")`,
-              ], { timeout: 3000 })
-              const clients = JSON.parse((clientResult.stdout ?? "").trim())
-              if (Array.isArray(clients)) lspInfo = clients.map((c: string) => `LSP: ${c}`).join("\n") + "\n"
-            } catch {}
-
-            const lines = diags.map(d => {
-              const sev = (["ERROR", "WARN", "INFO", "HINT"])[d.s - 1] || "?"
-              return `[${sev}] L${d.l}: ${d.m}`
-            })
-            return lspInfo + lines.join("\n")
-          }
-        } catch { continue }
-      }
-      return "No diagnostics found."
-    } catch {
-      return null // server unavailable — caller should fall back
-    }
-  }
 
   pi.on("session_start", async (_event, ctx) => {
     if (!existsSync(RECKONER_NVIM_INIT)) {
@@ -340,11 +499,13 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
       // Prefer persistent server (fast), fall back to spawn (slow)
-      const serverResult = await getDiagnosticsViaServer(file)
-      if (serverResult !== null) {
-        return {
-          content: [{ type: "text" as const, text: serverResult }],
-          details: { file, via: "server" },
+      if (nvimServerSocket) {
+        const result = await runOnServer(pi, nvimServerSocket, file, SERVER_LUA_DIAGNOSTICS)
+        if (result !== null) {
+          return {
+            content: [{ type: "text" as const, text: result }],
+            details: { file, via: "server" },
+          }
         }
       }
 
@@ -375,10 +536,20 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       const file = resolve(params.path.replace(/^@/, ""))
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
+      if (nvimServerSocket) {
+        const result = await runOnServer(pi, nvimServerSocket, file, SERVER_LUA_SYMBOLS, 5)
+        if (result !== null) {
+          return {
+            content: [{ type: "text" as const, text: result }],
+            details: { file, via: "server" },
+          }
+        }
+      }
+
       const output = await runNvimLua(pi, file, LUA_SYMBOLS, signal)
       return {
         content: [{ type: "text" as const, text: output || "No symbols found." }],
-        details: { file },
+        details: { file, via: "spawn" },
       }
     },
   })
@@ -400,10 +571,20 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       const file = resolve(params.path.replace(/^@/, ""))
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
+      if (nvimServerSocket) {
+        const result = await runOnServer(pi, nvimServerSocket, file, serverLuaDefinition(params.line, params.column))
+        if (result !== null) {
+          return {
+            content: [{ type: "text" as const, text: result }],
+            details: { file, line: params.line, column: params.column, via: "server" },
+          }
+        }
+      }
+
       const output = await runNvimLua(pi, file, LUA_DEFINITION(params.line, params.column), signal)
       return {
         content: [{ type: "text" as const, text: output || "No definition found." }],
-        details: { file, line: params.line, column: params.column },
+        details: { file, line: params.line, column: params.column, via: "spawn" },
       }
     },
   })
@@ -425,10 +606,20 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       const file = resolve(params.path.replace(/^@/, ""))
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
+      if (nvimServerSocket) {
+        const result = await runOnServer(pi, nvimServerSocket, file, serverLuaReferences(params.line, params.column))
+        if (result !== null) {
+          return {
+            content: [{ type: "text" as const, text: result }],
+            details: { file, line: params.line, column: params.column, via: "server" },
+          }
+        }
+      }
+
       const output = await runNvimLua(pi, file, LUA_REFERENCES(params.line, params.column), signal)
       return {
         content: [{ type: "text" as const, text: output || "No references found." }],
-        details: { file, line: params.line, column: params.column },
+        details: { file, line: params.line, column: params.column, via: "spawn" },
       }
     },
   })
@@ -448,10 +639,20 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       const file = resolve(params.path.replace(/^@/, ""))
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
+      if (nvimServerSocket) {
+        const result = await runOnServer(pi, nvimServerSocket, file, SERVER_LUA_FORMAT, 20)
+        if (result !== null) {
+          return {
+            content: [{ type: "text" as const, text: result }],
+            details: { file, via: "server" },
+          }
+        }
+      }
+
       const output = await runNvimLua(pi, file, LUA_FORMAT, signal)
       return {
         content: [{ type: "text" as const, text: output || "Format complete." }],
-        details: { file },
+        details: { file, via: "spawn" },
       }
     },
   })
