@@ -323,16 +323,33 @@ export default function memoryExtension(pi: ExtensionAPI) {
     emitPromotionCandidate(pi, saved)
   })
 
+  pi.events.on("reckoner:memory-note", (payload: {
+    category: MemoryCategory
+    note: string
+    files?: string[]
+    tags?: string[]
+    confidence?: LessonRecord["confidence"]
+  }) => {
+    if (!dir) return
+    const record = newRecord(payload.category, payload.note, {
+      files: payload.files ?? [],
+      tags: payload.tags ?? [],
+      confidence: payload.confidence ?? "medium",
+      source: "reflection",
+    })
+    const saved = upsertRecord(dir, record)
+    emitMemoryState(pi, dir, payload.category, saved)
+    emitPromotionCandidate(pi, saved)
+  })
+
   pi.registerTool({
     name: "remember",
     label: "Remember",
     description:
-      "Save a note to persistent memory. Use this to capture important learnings, decisions, patterns, mistakes, or open questions that should survive across sessions.",
-    promptSnippet: "Save important information to memory for future sessions",
+      "Save a note to persistent memory. Captures learnings, decisions, mistakes, or questions that survive across sessions.",
+    promptSnippet: "Save to persistent memory",
     promptGuidelines: [
-      "Use remember() to save: codebase architecture decisions, recurring patterns, bugs you fixed and why, user preferences, and open questions.",
-      "Call remember() at the end of significant work, before the session ends.",
-      "Be specific — vague notes are useless in future sessions.",
+      "Call remember() at session end. Be specific — vague notes are useless.",
     ],
     parameters: Type.Object({
       category: StringEnum([...CATEGORIES] as const, {
@@ -341,17 +358,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
       }),
       note: Type.String({ description: "The note to save. Be specific and concrete." }),
       files: Type.Optional(Type.Array(Type.String(), { description: "Optional file paths this note applies to." })),
-      tags: Type.Optional(Type.Array(Type.String(), { description: "Optional tags for relevance and recall." })),
-      confidence: Type.Optional(StringEnum(["low", "medium", "high"] as const, {
-        description: "Optional confidence level for the memory entry.",
-      })),
     }),
     async execute(_toolCallId: string, params: any) {
       if (!dir) throw new Error("Memory not initialized — session_start hasn't fired")
       const record = newRecord(params.category as MemoryCategory, params.note, {
         files: params.files ?? [],
-        tags: params.tags ?? [],
-        confidence: (params.confidence as LessonRecord["confidence"] | undefined) ?? "medium",
       })
       const saved = upsertRecord(dir, record)
       emitMemoryState(pi, dir, params.category as MemoryCategory, saved)
@@ -366,12 +377,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "recall",
     label: "Recall",
-    description: "Search memory for notes matching a keyword or topic. Returns matching entries across all categories.",
-    promptSnippet: "Search memory for past notes, decisions, or lessons",
-    promptGuidelines: [
-      "Use recall() when starting work on something you might have encountered before.",
-      "Use recall() to find past architectural decisions before making new ones.",
-    ],
+    description: "Search persistent memory for notes matching a keyword or topic.",
+    promptSnippet: "Search memory for past notes or decisions",
+    promptGuidelines: [],
     parameters: Type.Object({
       query: Type.String({ description: "Keyword or phrase to search for" }),
       category: Type.Optional(StringEnum([...CATEGORIES] as const, { description: "Optional category filter." })),

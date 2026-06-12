@@ -129,12 +129,10 @@ export default function repoMapExtension(pi: ExtensionAPI) {
     name: "repo_map",
     label: "Repo Map",
     description:
-      "Get a structural overview of the codebase. Shows the file tree, key symbols (functions, classes, types, exports), and how files relate. Use this BEFORE diving into specific files to understand the architecture.",
-    promptSnippet: "Get a structural overview of the codebase (files, symbols, architecture)",
+      "Structural overview of the codebase: file tree and key symbols (functions, classes, types). Use before diving into unfamiliar code.",
+    promptSnippet: "Structural codebase overview (files, symbols)",
     promptGuidelines: [
-      "Use repo_map at the start of any non-trivial task to understand the codebase structure.",
       "Use repo_map with a path filter to focus on a specific directory or module.",
-      "Prefer repo_map over reading multiple files when you need to understand architecture.",
     ],
     parameters: Type.Object({
       mode: StringEnum(["tree", "symbols", "overview"] as const, {
@@ -144,16 +142,13 @@ export default function repoMapExtension(pi: ExtensionAPI) {
       path: Type.Optional(
         Type.String({ description: "Filter to a subdirectory, e.g. 'src/scenes' or 'lib'. Defaults to project root." }),
       ),
-      pattern: Type.Optional(
-        Type.String({ description: "Glob pattern to filter files, e.g. '*.ts' or '**/*.py'" }),
-      ),
     }),
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const cwd = ctx.cwd
       const mode = params.mode || "overview"
       const filterPath = params.path?.replace(/^@/, "") || "."
-      const globPattern = params.pattern || ""
+      const globPattern = ""
 
       const sections: string[] = []
 

@@ -9,7 +9,7 @@ The coding agent that learns from its mistakes.
 ## The problem
 
 Every coding agent forgets everything between sessions. It makes the same type error,
-misuses the same API, breaks the same test — every time, from scratch. Brilliant for
+misuses the same API, breaks the same test - every time, from scratch. Brilliant for
 five minutes, then gone.
 
 ## The thesis
@@ -30,17 +30,16 @@ That's it. One loop. Everything else supports it.
 **The agent edits code.** It has full access to your filesystem, shell, and tools.
 
 **Auto-verify catches errors.** After every turn that edits files, the agent checks
-its own work — type errors via `tsc`, LSP diagnostics via neovim for any language
-(Python, Go, Rust, etc.), and test failures. If something breaks, it sees the error
-and fixes it before telling you it's done.
+its own work — type errors, test failures, and diagnostic issues. If something
+breaks, it sees the error and fixes it before telling you it’s done.
 
 **Lessons are recorded automatically.** When auto-verify catches an error, the pattern
-is written to `.pi/memory/mistakes.md` — what file, what error, whether it was fixed.
+is written to `.pi/memory/mistakes.md` - what file, what error, whether it was fixed.
 No manual action needed. The loop closes itself.
 
 **Next session starts with context.** Recent lessons, architectural decisions, user
 preferences, and open questions are injected into the system prompt. The agent picks
-up where it left off. Mistakes are prioritized — they're the most valuable signal.
+up where it left off. Mistakes are prioritized - they're the most valuable signal.
 
 **Memory is human-readable.** Everything is stored as markdown files you can open,
 edit, and version. Not a vector database. Not an opaque embedding store. Your files,
@@ -52,7 +51,7 @@ The loop is the thesis. These are the organs that support it:
 
 | Capability | How |
 |-----------|-----|
-| **Uses your editor** | LSP diagnostics and treesitter via headless neovim. Your parsers, your servers. |
+| **Structural search** | AST-aware code search and refactoring via ast-grep. |
 | **Plans before editing** | Plan mode (`Ctrl+T`) blocks edits. The agent reads and thinks first. |
 | **Safety net** | Git state checkpointed before and after every turn. `/undo` to restore. |
 | **Web research** | `web_search` and `web_fetch` for docs and APIs. Research before reinventing. |
@@ -73,21 +72,9 @@ That's it. Pi clones the repo, runs `npm install`, and loads everything.
 | Requirement | Why |
 |---|---|
 | [pi](https://github.com/mariozechner/pi-coding-agent) 0.64+ | the agent runtime |
-| [neovim](https://neovim.io/) 0.10+ | LSP diagnostics, treesitter symbols, code intelligence |
 | `rg` (ripgrep) | codebase scanning |
 | `fd` | file discovery |
-| `JINA_API_KEY` | web search — [free tier](https://jina.ai/reader) |
-
-### First-time neovim setup
-
-Reckoner uses a headless neovim instance for real LSP diagnostics. The first time
-you use it, install treesitter parsers for your languages:
-
-```bash
-nvim --headless +"TSInstall typescript javascript python lua go rust" +"sleep 20" +"qa"
-```
-
-Also make sure language servers are on your PATH (`ts_ls`, `pyright`, `gopls`, etc.).
+| `JINA_API_KEY` | web search - [free tier](https://jina.ai/reader) |
 
 ### Try before installing
 
@@ -117,11 +104,11 @@ Reckoner loads automatically.
 
 ### Workflow
 
-1. Start in plan mode (`/plan` or `Ctrl+T`) — let the agent read and understand
-2. Switch to build mode (`/build` or `Ctrl+T`) — now it can edit
-3. Auto-verify catches errors — the agent fixes them before reporting done
-4. Lessons are recorded automatically — patterns persist to next session
-5. `/undo` if something goes wrong — checkpoints restore the working tree
+1. Start in plan mode (`/plan` or `Ctrl+T`) - let the agent read and understand
+2. Switch to build mode (`/build` or `Ctrl+T`) - now it can edit
+3. Auto-verify catches errors - the agent fixes them before reporting done
+4. Lessons are recorded automatically - patterns persist to next session
+5. `/undo` if something goes wrong - checkpoints restore the working tree
 
 ### Model routing
 
@@ -142,7 +129,7 @@ Reckoner now ships a shared task→model policy in `prompts/model-routing.md` an
 **OpenCode**
 - This repo includes `opencode.json` with build/plan/explore and `code-reviewer` agents pinned to the matching OpenCode Go models.
 - The default model is the balanced build model, `opencode-go/kimi-k2.5`.
-- OpenCode’s built-in `plan` agent uses `opencode-go/glm-5` for deeper reasoning, while `explore` stays on `opencode-go/minimax-m2.5`.
+- OpenCode's built-in `plan` agent uses `opencode-go/glm-5` for deeper reasoning, while `explore` stays on `opencode-go/minimax-m2.5`.
 - `code-reviewer` is a custom subagent for review passes on `opencode-go/minimax-m2.7`.
 
 ### Commands
@@ -170,14 +157,9 @@ Reckoner now ships a shared task→model policy in `prompts/model-routing.md` an
 | `remember` | Save a note to persistent memory |
 | `recall` | Search memory for past notes |
 | `repo_map` | Structural overview of the codebase |
+| `sg_search` | Structural code search + rewrite preview via AST patterns |
 | `web_fetch` | Fetch any URL as clean markdown |
 | `web_search` | Search the web |
-| `nvim_diagnostics` | Real LSP diagnostics via neovim |
-| `nvim_symbols` | Treesitter AST symbol extraction |
-| `nvim_definition` | LSP go-to-definition |
-| `nvim_references` | LSP find-all-references |
-| `nvim_format` | Format a file via LSP |
-| `tasks` | Structured task plans that survive context compression |
 
 ## Memory
 
@@ -193,8 +175,8 @@ Stored as markdown in `.pi/memory/` (per-project) or `~/.pi/agent/memory/` (glob
 ```
 
 Two layers:
-- **Storage** — append-only, human-readable. Write liberally. The files grow. That's fine.
-- **Injection** — curated subset in the system prompt. Only the most relevant entries. Mistakes first.
+- **Storage** - append-only, human-readable. Write liberally. The files grow. That's fine.
+- **Injection** - curated subset in the system prompt. Only the most relevant entries. Mistakes first.
 
 These are your files. Open them. Edit them. Delete things that are wrong. They're yours.
 

@@ -5,18 +5,9 @@ import { StringEnum } from "@mariozechner/pi-ai"
 /**
  * ast-grep: structural code search and rewrite via tree-sitter AST patterns.
  *
- * Unlike text-based grep, ast-grep matches on syntax structure:
- *   - `function $NAME($$$)` matches any function declaration
- *   - `if ($COND) { $$$BODY }` matches any if-block
- *   - `$OBJ.on("$EVENT", $$$)` matches any event listener
- *
- * Metavariables:
- *   $NAME  — matches a single AST node (identifier, expression, etc.)
- *   $$$    — matches zero or more nodes (variadic, like function body)
- *
- * Three tools:
- *   sg_search  — find code matching an AST pattern
- *   sg_rewrite — find and replace using AST patterns (preview mode)
+ * One tool: sg_search (with optional rewrite param for preview).
+ * Fewer tools, simpler schemas — Factory's finding that "complex tool schemas
+ * exponentially increase error rates" applies here.
  *
  * Requires `ast-grep` (sg) on PATH. Install: brew install ast-grep
  */
@@ -27,7 +18,7 @@ const LANGUAGES = [
   "json", "yaml", "html", "css", "bash",
 ] as const
 
-const MAX_OUTPUT = 50_000 // bytes
+const MAX_OUTPUT = 50_000
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text
@@ -50,29 +41,26 @@ export default function astGrepExtension(pi: ExtensionAPI) {
     }
   })
 
-  // ── sg_search ─────────────────────────────────────────────
-
   pi.registerTool({
     name: "sg_search",
     label: "AST Search",
-    description: [
-      "Search code using AST patterns via ast-grep. Matches on syntax structure, not text.",
-      "",
-      "Pattern syntax:",
-      "  $NAME  — matches any single AST node (identifier, expression, type, etc.)",
-      "  $$$    — matches zero or more nodes (function bodies, argument lists, etc.)",
-      "",
-      "Examples:",
-      "  'function $NAME($$$)' — find all function declarations",
-      "  'if ($COND) { $$$BODY }' — find all if-blocks",
-      "  'import $$$FROM from \"$MOD\"' — find all imports",
-      "  '$OBJ.on(\"$EVENT\", $$$)' — find event listeners",
-      "  'async function $NAME($$$) { $$$BODY }' — find async functions",
-      "  'const $NAME: $TYPE = $VAL' — find typed const declarations",
-    ].join("\n"),
+    description:
+      "Search code using AST patterns via ast-grep. Matches on syntax structure, not text.\n" +
+      "Pattern syntax:\n" +
+      "  $NAME  — matches any single AST node (identifier, expression, type, etc.)\n" +
+      "  $$$    — matches zero or more nodes (function bodies, argument lists, etc.)\n" +
+      "\n" +
+      "Examples:\n" +
+      "  'function $NAME($$$)' — find all function declarations\n" +
+      "  'if ($COND) { $$$BODY }' — find all if-blocks\n" +
+      "  'import $$$FROM from \"$MOD\"' — find all imports\n" +
+      "  '$OBJ.on(\"$EVENT\", $$$)' — find event listeners\n" +
+      "  'async function $NAME($$$) { $$$BODY }' — find async functions\n" +
+      "  'const $NAME: $TYPE = $VAL' — find typed const declarations\n" +
+      "\n" +
+      "If rewrite is provided, shows a preview diff without applying. Use edit to apply.",
     promptSnippet: "Search code by AST pattern (structural, not text)",
     promptGuidelines: [
-      "Use sg_search for structural code queries — finding patterns, not specific strings.",
       "Prefer sg_search over grep/rg when you need to match code structure (e.g. all functions with a specific shape).",
       "Use $NAME for single nodes, $$$ for variadic matches (bodies, args).",
     ],
@@ -80,8 +68,11 @@ export default function astGrepExtension(pi: ExtensionAPI) {
       pattern: Type.String({
         description: "AST pattern to search for. Use $NAME for single nodes, $$$ for variadic.",
       }),
-      lang: Type.Optional(StringEnum([...LANGUAGES], {
-        description: "Language of the pattern. Auto-detected from file extensions if omitted.",
+      rewrite: Type.Optional(Type.String({
+        description: "Replacement pattern using captured metavariables. Shows preview diff without applying.",
+      })),
+      lang: Type.Optional(Type.String({
+        description: "Language (e.g. typescript, python). Auto-detected if omitted.",
       })),
       path: Type.Optional(Type.String({
         description: "Path to search in. Defaults to current directory.",
@@ -95,6 +86,7 @@ export default function astGrepExtension(pi: ExtensionAPI) {
       }
 
       const args = ["run", "-p", params.pattern]
+      if (params.rewrite) args.push("-r", params.rewrite)
       if (params.lang) args.push("-l", params.lang)
       if (params.path) args.push(params.path)
 
@@ -103,108 +95,26 @@ export default function astGrepExtension(pi: ExtensionAPI) {
         const output = (result.stdout ?? "").trim()
         if (!output) {
           return {
-            content: [{ type: "text" as const, text: "No matches found." }],
+            content: [{ type: "text" as const, text: params.rewrite ? "No matches found for rewrite." : "No matches found." }],
             details: { pattern: params.pattern, matches: 0 },
           }
         }
 
-        // Count matches (each result starts with a file path)
         const matchCount = output.split(/\n/).filter(l => l.match(/^[a-zA-Z._\/]/)).length
+        const prefix = params.rewrite ? "Preview (not applied):\n\n" : ""
 
         return {
-          content: [{ type: "text" as const, text: truncate(output, MAX_OUTPUT) }],
-          details: { pattern: params.pattern, matches: matchCount },
+          content: [{ type: "text" as const, text: `${prefix}${truncate(output, MAX_OUTPUT)}` }],
+          details: { pattern: params.pattern, rewrite: params.rewrite, matches: matchCount },
         }
       } catch (e: any) {
         const stderr = e?.stderr ?? ""
         return {
-          content: [{ type: "text" as const, text: stderr || "ast-grep search failed." }],
+          content: [{ type: "text" as const, text: stderr || "ast-grep failed." }],
         }
       }
     },
   })
-
-  // ── sg_rewrite ────────────────────────────────────────────
-
-  pi.registerTool({
-    name: "sg_rewrite",
-    label: "AST Rewrite",
-    description: [
-      "Preview a structural code rewrite using ast-grep. Shows the diff without applying.",
-      "",
-      "Pattern syntax (same as sg_search):",
-      "  $NAME  — matches any single AST node",
-      "  $$$    — matches zero or more nodes",
-      "",
-      "The rewrite string uses the same metavariables captured by the pattern.",
-      "",
-      "Examples:",
-      "  pattern: 'console.log($MSG)'",
-      "  rewrite: 'logger.info($MSG)'",
-      "",
-      "  pattern: 'var $NAME = $VAL'",
-      "  rewrite: 'const $NAME = $VAL'",
-      "",
-      "This shows a preview diff. Use the edit tool to apply changes.",
-    ].join("\n"),
-    promptSnippet: "Preview structural code rewrite via AST patterns",
-    promptGuidelines: [
-      "Use sg_rewrite to preview refactoring across files — it shows diffs without applying.",
-      "After reviewing the diff, use the edit tool to apply the specific changes you want.",
-      "Metavariables ($NAME, $VAL, etc.) captured in the pattern are available in the rewrite string.",
-    ],
-    parameters: Type.Object({
-      pattern: Type.String({
-        description: "AST pattern to match.",
-      }),
-      rewrite: Type.String({
-        description: "Replacement pattern using captured metavariables from the match pattern.",
-      }),
-      lang: Type.Optional(StringEnum([...LANGUAGES], {
-        description: "Language of the pattern.",
-      })),
-      path: Type.Optional(Type.String({
-        description: "Path to search in. Defaults to current directory.",
-      })),
-    }),
-    async execute(_id, params, signal) {
-      if (!available) {
-        return {
-          content: [{ type: "text" as const, text: "ast-grep not found. Install: brew install ast-grep" }],
-        }
-      }
-
-      const args = ["run", "-p", params.pattern, "-r", params.rewrite]
-      if (params.lang) args.push("-l", params.lang)
-      if (params.path) args.push(params.path)
-
-      try {
-        const result = await pi.exec("ast-grep", args, { timeout: 15_000, signal })
-        const output = (result.stdout ?? "").trim()
-        if (!output) {
-          return {
-            content: [{ type: "text" as const, text: "No matches found for rewrite." }],
-            details: { pattern: params.pattern, matches: 0 },
-          }
-        }
-
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Preview (not applied):\n\n${truncate(output, MAX_OUTPUT)}`,
-          }],
-          details: { pattern: params.pattern, rewrite: params.rewrite },
-        }
-      } catch (e: any) {
-        const stderr = e?.stderr ?? ""
-        return {
-          content: [{ type: "text" as const, text: stderr || "ast-grep rewrite failed." }],
-        }
-      }
-    },
-  })
-
-  // ── /sg command ───────────────────────────────────────────
 
   pi.registerCommand("sg", {
     description: "Quick ast-grep search: /sg <pattern> [lang]",
@@ -220,7 +130,6 @@ export default function astGrepExtension(pi: ExtensionAPI) {
         return
       }
 
-      // Last part might be a language
       const lastPart = parts[parts.length - 1]
       const isLang = (LANGUAGES as readonly string[]).includes(lastPart)
       const lang = isLang ? parts.pop() : undefined

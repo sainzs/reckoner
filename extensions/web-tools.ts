@@ -110,12 +110,10 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     name: "web_fetch",
     label: "Web Fetch",
     description:
-      "Fetch a URL and return its content as clean markdown. Uses Jina Reader to convert web pages to readable text. Good for documentation, articles, wiki pages, and any web content.",
-    promptSnippet: "Fetch any URL as clean markdown for reading",
+      "Fetch a URL and return its content as clean markdown via Jina Reader. Good for docs, articles, and any web content.",
+    promptSnippet: "Fetch any URL as clean markdown",
     promptGuidelines: [
-      "Use web_fetch to read online documentation, wiki pages, articles, or any URL.",
-      "Prefer web_fetch over bash curl for reading web content — it returns clean markdown.",
-      "Some sites behind Cloudflare may return 403. Try alternative URLs if so.",
+      "Prefer web_fetch over bash curl — returns clean markdown. Some Cloudflare sites return 403.",
     ],
     parameters: Type.Object({
       url: Type.String({ description: "Full URL to fetch (must start with http:// or https://)" }),
@@ -141,12 +139,10 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Requires JINA_API_KEY environment variable (free at https://jina.ai/reader). If no API key is set, falls back to suggesting direct web_fetch on known documentation sites.",
-    promptSnippet: "Search the web for documentation, solutions, or any information",
+      "Search the web via Jina Search API. Returns results with titles, URLs, and snippets. Requires JINA_API_KEY.",
+    promptSnippet: "Search the web for docs, solutions, or information",
     promptGuidelines: [
-      "Use web_search to find documentation, solutions, APIs, or any information online.",
-      "After searching, use web_fetch to read the most relevant results in full.",
-      "If web_search reports no API key, use web_fetch directly on known doc URLs instead.",
+      "After searching, web_fetch the best results. Without JINA_API_KEY, web_fetch doc sites directly.",
     ],
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
