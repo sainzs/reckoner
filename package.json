@@ -1,0 +1,13 @@
+{
+  "name": "reckoner",
+  "version": "0.1.0",
+  "description": "A batteries-included pi agent. Memory, senses, craft, and a safety net — because we separate like ripples on a blank shore.",
+  "keywords": ["pi-package", "coding-agent", "pi"],
+  "author": "sainzs",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  }
+}
