@@ -100,35 +100,51 @@ function buildInjection(dir: string): string {
     budget -= section.length
   }
 
-  // Priority 2: Codebase — architectural decisions
-  const codebase = readFile(memFile(dir, "codebase"))
-  if (codebase && codebase.trim().length > 50 && budget > 500) {
-    const section = `### Codebase\n${codebase.trim()}`
-    parts.push(section)
-    budget -= section.length
+  // Priority 2: Codebase — architectural decisions (last 5 entries)
+  if (budget > 500) {
+    const codebaseEntries = lastEntries(dir, "codebase", 5)
+    if (codebaseEntries.length > 0) {
+      const section = `### codebase\n${codebaseEntries.join("\n\n")}`
+      if (section.length <= budget) {
+        parts.push(section)
+        budget -= section.length
+      }
+    }
   }
 
-  // Priority 3: Preferences — user style
-  const prefs = readFile(memFile(dir, "preferences"))
-  if (prefs && prefs.trim().length > 20 && budget > 300) {
-    const section = `### Preferences\n${prefs.trim()}`
-    parts.push(section)
-    budget -= section.length
+  // Priority 3: Preferences — user style (last 5 entries)
+  if (budget > 300) {
+    const prefEntries = lastEntries(dir, "preferences", 5)
+    if (prefEntries.length > 0) {
+      const section = `### Preferences\n${prefEntries.join("\n\n")}`
+      if (section.length <= budget) {
+        parts.push(section)
+        budget -= section.length
+      }
+    }
   }
 
-  // Priority 4: Questions — open unknowns
-  const questions = readFile(memFile(dir, "questions"))
-  if (questions && questions.trim().length > 20 && budget > 300) {
-    const section = `### Open questions\n${questions.trim()}`
-    parts.push(section)
-    budget -= section.length
+  // Priority 4: Questions — open unknowns (last 5 entries)
+  if (budget > 300) {
+    const questionEntries = lastEntries(dir, "questions", 5)
+    if (questionEntries.length > 0) {
+      const section = `### Open questions\n${questionEntries.join("\n\n")}`
+      if (section.length <= budget) {
+        parts.push(section)
+        budget -= section.length
+      }
+    }
   }
 
   // Priority 5: Journal — last 2 entries (context, not the point)
   if (budget > 400) {
     const journal = lastEntries(dir, "journal", 2)
     if (journal.length > 0) {
-      parts.push(`### Recent journal\n${journal.join("\n\n")}`)
+      const section = `### Recent journal\n${journal.join("\n\n")}`
+      if (section.length <= budget) {
+        parts.push(section)
+        budget -= section.length
+      }
     }
   }
 

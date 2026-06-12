@@ -67,6 +67,7 @@ These are not independent features. They are organs in one system.
 | `git-checkpoint.ts` | Stash before/after every turn. Safety net. |
 | `guardrails.ts` | Block dangerous paths and commands. |
 | `plan-mode.ts` | Plan/build toggle. Earn the right to edit. |
+| `tasks.ts` | Structured task plans that survive context compression. |
 
 ## Memory architecture
 
@@ -85,7 +86,8 @@ Priority order for injection:
 4. **Questions** — open unknowns to revisit
 5. **Journal** (last 2) — chronological context, lowest priority
 
-Budget: 3000 chars. If exceeded, journal is trimmed first.
+Budget: 3000 chars. Each section must fit within remaining budget or it's skipped.
+Higher-priority sections always get their space. Lower-priority sections yield gracefully.
 
 ## Event protocol
 
@@ -110,7 +112,8 @@ reckoner/
 │   ├── web-tools.ts         # web_fetch + web_search
 │   ├── git-checkpoint.ts    # stash before/after every turn
 │   ├── guardrails.ts        # block dangerous paths and commands
-│   └── plan-mode.ts         # plan/build toggle (Ctrl+T)
+│   ├── plan-mode.ts         # plan/build toggle (Ctrl+T)
+│   └── tasks.ts             # structured task tracking
 ├── nvim/
 │   └── init.lua             # minimal nvim config for headless
 ├── skills/                  # task-specific instructions
@@ -144,6 +147,20 @@ reckoner/
 | Injection prioritizes mistakes | Most valuable for the loop. Journal is least valuable. |
 | `StringEnum` everywhere | `Type.Union`/`Type.Literal` breaks Google API. |
 | Git checkpoint via `stash create` | Non-destructive. Stages untracked files first. |
+
+## Task tracking
+
+For multi-step work, the agent can create a structured plan that persists on disk:
+
+```
+tasks(action: "plan", title: "...", steps: ["...", "..."])
+tasks(action: "check", step: "partial match text")
+tasks(action: "view")
+tasks(action: "done")
+```
+
+File: `.pi/tasks.md`. Active task is injected into the system prompt at session start.
+Completed tasks are archived to `.pi/tasks-done.md`.
 
 ## What to deepen next
 
