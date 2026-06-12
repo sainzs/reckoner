@@ -70,6 +70,7 @@ These are not independent features. They are organs in one system.
 | `tasks.ts` | Structured task plans that survive context compression. |
 | `nvim-server.ts` | Persistent headless nvim. LSP stays warm across requests. |
 | `harness-widget.ts` | Orientation widget above editor. Task + memory + status at a glance. |
+| `harness-footer.ts` | Unified footer with consolidated status + token usage. |
 
 ## Memory architecture
 
@@ -117,7 +118,8 @@ reckoner/
 │   ├── plan-mode.ts         # plan/build toggle (Ctrl+T)
 │   ├── tasks.ts             # structured task tracking
 │   ├── nvim-server.ts       # persistent headless nvim server
-│   └── harness-widget.ts    # orientation widget (the cockpit)
+│   ├── harness-widget.ts    # orientation widget (the cockpit)
+│   └── harness-footer.ts    # unified custom footer
 ├── nvim/
 │   └── init.lua             # minimal nvim config for headless
 ├── skills/                  # task-specific instructions
