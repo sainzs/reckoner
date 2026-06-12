@@ -72,6 +72,7 @@ These are not independent features. They are organs in one system.
 | `harness-widget.ts` | Orientation widget above editor. Task + memory + status at a glance. |
 | `harness-footer.ts` | Unified footer with consolidated status + token usage. |
 | `harness-overlay.ts` | Ctrl+O orientation overlay. Full memory/task browser. |
+| `ast-grep.ts` | Structural code search + rewrite via AST patterns. |
 
 ## Memory architecture
 
@@ -121,7 +122,8 @@ reckoner/
 │   ├── nvim-server.ts       # persistent headless nvim server
 │   ├── harness-widget.ts    # orientation widget (the cockpit)
 │   ├── harness-footer.ts    # unified custom footer
-│   └── harness-overlay.ts   # orientation overlay (Ctrl+O)
+│   ├── harness-overlay.ts   # orientation overlay (Ctrl+O)
+│   └── ast-grep.ts          # structural code search/rewrite
 ├── nvim/
 │   └── init.lua             # minimal nvim config for headless
 ├── skills/                  # task-specific instructions
@@ -189,7 +191,7 @@ The loop exists. These deepen it:
 
 ## Dependencies on PATH
 
-`nvim`, `rg`, `fd`, `git`, `node`, `npx`
+`nvim`, `rg`, `fd`, `git`, `node`, `npx`, `ast-grep`
 
 ## User preferences
 
