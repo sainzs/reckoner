@@ -8,13 +8,10 @@ import { StringEnum } from "@mariozechner/pi-ai"
  * Provides the agent with a bird's-eye view of the project:
  * - File tree with filtering
  * - Symbol extraction (functions, classes, exports, types)
- * - Dependency graph between files
  *
- * Uses rg (ripgrep) for fast scanning — no tree-sitter or AST parser needed.
+ * Symbol extraction prefers ast-grep (sg) for AST-aware accuracy,
+ * falling back to ripgrep (rg) regex when sg is unavailable.
  * Covers TypeScript, JavaScript, Python, Go, Rust, and Java.
- *
- * This is the #1 feature that makes Aider effective at navigating
- * unfamiliar codebases. Without it, the agent reads files blindly.
  */
 
 const MAX_OUTPUT = 30_000
@@ -58,6 +55,57 @@ const EXT_TO_LANG: Record<string, string> = {
   go: "go",
   rs: "rs",
   java: "java",
+}
+
+// ast-grep language names and patterns for symbol extraction
+const SG_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "tsx",
+  mjs: "javascript", mts: "typescript",
+  py: "python", go: "go", rs: "rust", java: "java",
+}
+
+const SG_PATTERNS: Record<string, string[]> = {
+  typescript: [
+    "function $NAME($$$ARGS) { $$$BODY }",
+    "const $NAME = ($$$ARGS) => $$$BODY",
+    "class $NAME $$$REST { $$$BODY }",
+    "interface $NAME $$$REST { $$$BODY }",
+    "type $NAME = $$$DEF",
+    "enum $NAME { $$$BODY }",
+  ],
+  tsx: [
+    "function $NAME($$$ARGS) { $$$BODY }",
+    "const $NAME = ($$$ARGS) => $$$BODY",
+    "class $NAME $$$REST { $$$BODY }",
+    "interface $NAME $$$REST { $$$BODY }",
+    "type $NAME = $$$DEF",
+  ],
+  javascript: [
+    "function $NAME($$$ARGS) { $$$BODY }",
+    "const $NAME = ($$$ARGS) => $$$BODY",
+    "class $NAME $$$REST { $$$BODY }",
+  ],
+  python: [
+    "def $NAME($$$ARGS): $$$BODY",
+    "class $NAME($$$ARGS): $$$BODY",
+    "class $NAME: $$$BODY",
+  ],
+  go: [
+    "func $NAME($$$ARGS) $$$RET { $$$BODY }",
+    "type $NAME struct { $$$BODY }",
+    "type $NAME interface { $$$BODY }",
+  ],
+  rust: [
+    "fn $NAME($$$ARGS) $$$RET { $$$BODY }",
+    "struct $NAME { $$$BODY }",
+    "enum $NAME { $$$BODY }",
+    "trait $NAME { $$$BODY }",
+    "impl $NAME { $$$BODY }",
+  ],
+  java: [
+    "class $NAME $$$REST { $$$BODY }",
+    "interface $NAME $$$REST { $$$BODY }",
+  ],
 }
 
 function truncateOutput(text: string): { content: string; truncated: boolean } {
@@ -157,63 +205,7 @@ export default function repoMapExtension(pi: ExtensionAPI) {
 
       // --- Symbol extraction ---
       if (mode === "symbols" || mode === "overview") {
-        const symbolSections: string[] = []
-
-        for (const [ext, lang] of Object.entries(EXT_TO_LANG)) {
-          const patterns = PATTERNS[lang]
-          if (!patterns) continue
-
-          // Combine all patterns for this language into one rg call
-          const combinedPattern = patterns.map((p) => p.pattern).join("|")
-
-          try {
-            const rgArgs = [
-              "--no-heading",
-              "--line-number",
-              "--type-add", `${lang}:*.${ext}`,
-              "--type", lang,
-              "-e", combinedPattern,
-              filterPath,
-            ]
-
-            const result = await pi.exec("rg", rgArgs, { timeout: SCAN_TIMEOUT, signal })
-            const output = (result.stdout ?? "").trim()
-            if (!output) continue
-
-            // Parse rg output: file:line:match
-            const lines = output.split("\n").filter(Boolean)
-            const byFile = new Map<string, string[]>()
-
-            for (const line of lines) {
-              const colonIdx = line.indexOf(":")
-              if (colonIdx < 0) continue
-              const rest = line.slice(colonIdx + 1)
-              const colonIdx2 = rest.indexOf(":")
-              if (colonIdx2 < 0) continue
-
-              const file = line.slice(0, colonIdx)
-              const match = rest.slice(colonIdx2 + 1).trim()
-              // Clean up the match - just show the declaration signature
-              const clean = match
-                .replace(/\{.*$/, "")
-                .replace(/\s+/g, " ")
-                .trim()
-                .slice(0, 120)
-
-              if (!byFile.has(file)) byFile.set(file, [])
-              byFile.get(file)!.push(clean)
-            }
-
-            for (const [file, symbols] of byFile) {
-              const header = `### ${file}`
-              const body = symbols.map((s) => `  ${s}`).join("\n")
-              symbolSections.push(`${header}\n${body}`)
-            }
-          } catch {
-            // rg failed for this pattern/type — skip silently
-          }
-        }
-
+        const symbolSections = await extractSymbols(pi, filterPath, signal)
         if (symbolSections.length > 0) {
           sections.push(`## Symbols\n\n${symbolSections.join("\n\n")}`)
         }
@@ -235,6 +227,141 @@ export default function repoMapExtension(pi: ExtensionAPI) {
       }
     },
   })
+}
+
+/**
+ * Extract symbols using ast-grep (preferred) or ripgrep (fallback).
+ * Returns formatted sections like: ### file.ts\n  function foo\n  class Bar
+ */
+async function extractSymbols(
+  pi: ExtensionAPI,
+  filterPath: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  // Try ast-grep first
+  const sgResult = await extractSymbolsSg(pi, filterPath, signal)
+  if (sgResult !== null) return sgResult
+
+  // Fall back to regex via ripgrep
+  return extractSymbolsRg(pi, filterPath, signal)
+}
+
+async function extractSymbolsSg(
+  pi: ExtensionAPI,
+  filterPath: string,
+  signal?: AbortSignal,
+): Promise<string[] | null> {
+  // Check sg availability
+  try {
+    await pi.exec("sg", ["--version"], { timeout: 3000 })
+  } catch {
+    return null // sg not available, fall back to rg
+  }
+
+  const byFile = new Map<string, string[]>()
+  const seen = new Set<string>() // dedup by file:line
+
+  for (const [lang, patterns] of Object.entries(SG_PATTERNS)) {
+    for (const pattern of patterns) {
+      try {
+        const result = await pi.exec("sg", [
+          "run", "-p", pattern, "-l", lang, filterPath, "--json",
+        ], { timeout: SCAN_TIMEOUT, signal })
+
+        const output = (result.stdout ?? "").trim()
+        if (!output) continue
+
+        const matches = JSON.parse(output)
+        for (const m of matches) {
+          const file = m.file as string
+          const line = (m.range?.start?.line ?? 0) + 1
+          const key = `${file}:${line}`
+          if (seen.has(key)) continue
+          seen.add(key)
+
+          // Extract the name from metaVariables
+          const name = m.metaVariables?.single?.NAME?.text ?? ""
+          // Get first line of matched text as the signature
+          const firstLine = (m.lines as string ?? m.text as string ?? "")
+            .split("\n")[0]
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 120)
+
+          if (!byFile.has(file)) byFile.set(file, [])
+          byFile.get(file)!.push(`L${line} ${firstLine}`)
+        }
+      } catch {
+        // Pattern failed for this language — skip
+      }
+    }
+  }
+
+  if (byFile.size === 0) return null // no results, try rg
+
+  const sections: string[] = []
+  for (const [file, symbols] of [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    sections.push(`### ${file}\n${symbols.map(s => `  ${s}`).join("\n")}`)
+  }
+  return sections
+}
+
+async function extractSymbolsRg(
+  pi: ExtensionAPI,
+  filterPath: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const symbolSections: string[] = []
+
+  for (const [ext, lang] of Object.entries(EXT_TO_LANG)) {
+    const patterns = PATTERNS[lang]
+    if (!patterns) continue
+
+    const combinedPattern = patterns.map(p => p.pattern).join("|")
+
+    try {
+      const rgArgs = [
+        "--no-heading", "--line-number",
+        "--type-add", `${lang}:*.${ext}`,
+        "--type", lang,
+        "-e", combinedPattern,
+        filterPath,
+      ]
+
+      const result = await pi.exec("rg", rgArgs, { timeout: SCAN_TIMEOUT, signal })
+      const output = (result.stdout ?? "").trim()
+      if (!output) continue
+
+      const lines = output.split("\n").filter(Boolean)
+      const byFile = new Map<string, string[]>()
+
+      for (const line of lines) {
+        const colonIdx = line.indexOf(":")
+        if (colonIdx < 0) continue
+        const rest = line.slice(colonIdx + 1)
+        const colonIdx2 = rest.indexOf(":")
+        if (colonIdx2 < 0) continue
+
+        const file = line.slice(0, colonIdx)
+        const match = rest.slice(colonIdx2 + 1).trim()
+          .replace(/\{.*$/, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 120)
+
+        if (!byFile.has(file)) byFile.set(file, [])
+        byFile.get(file)!.push(match)
+      }
+
+      for (const [file, symbols] of byFile) {
+        symbolSections.push(`### ${file}\n${symbols.map(s => `  ${s}`).join("\n")}`)
+      }
+    } catch {
+      // rg failed for this pattern/type — skip
+    }
+  }
+
+  return symbolSections
 }
 
 /**

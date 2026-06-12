@@ -18,7 +18,7 @@ const BUILD_TOOLS_BLOCKED = new Set<string>() // nothing blocked
 const PLAN_TOOLS_BLOCKED = new Set(["edit", "write"]) // block mutation tools
 
 function getModeLabel(mode: Mode): string {
-  return mode === "plan" ? "📋 plan" : "🔨 build"
+  return mode === "plan" ? "PLAN" : "BUILD"
 }
 
 function getModePrompt(mode: Mode): string {
@@ -48,12 +48,12 @@ export default function planModeExtension(pi: ExtensionAPI) {
     if (ctx.hasUI) {
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
     }
-  })
 
-  pi.on("before_agent_start", async (event) => {
-    const modePrompt = getModePrompt(currentMode)
-    if (!modePrompt) return
-    return { systemPrompt: `${event.systemPrompt}${modePrompt}` }
+    pi.events.emit("reckoner:register-injection", {
+      key: "plan-mode",
+      priority: 50,
+      build: () => getModePrompt(currentMode),
+    })
   })
 
   pi.on("tool_call", async (event, ctx) => {
@@ -80,7 +80,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
     description: "Switch to Plan mode (read-only, no edits)",
     handler: async (_args, ctx) => {
       currentMode = "plan"
-      ctx.ui.notify("Plan mode: edit and write tools are disabled. Analyze and plan before building.", "info")
+      ctx.ui.notify("PLAN mode: edit and write tools are disabled. Analyze before building.", "info")
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
     },
   })
@@ -89,7 +89,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
     description: "Switch to Build mode (full tool access)",
     handler: async (_args, ctx) => {
       currentMode = "build"
-      ctx.ui.notify("Build mode: all tools enabled. Go ahead and implement.", "info")
+      ctx.ui.notify("BUILD mode: full tool access enabled.", "info")
       ctx.ui.setStatus("mode", getModeLabel(currentMode))
     },
   })

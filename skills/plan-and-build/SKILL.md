@@ -10,7 +10,7 @@ Use this for anything bigger than a single-file change.
 ## Phase 1 — Understand
 1. Read `AGENTS.md`, `README.md`, relevant source files.
 2. Run `recall()` for anything related to this area.
-3. Map the relevant code: what files own what behavior?
+3. Map the relevant code with `repo_map` and `nvim_symbols`: what files own what behavior?
 4. Identify what you don't know — library APIs, system constraints, user intent.
 5. Research unknowns with `web_search` / `web_fetch` before planning.
 
@@ -23,17 +23,19 @@ Write a plan before touching anything:
 - What is the rollback if something goes wrong?
 - What tests will confirm it's correct?
 
+Use `tasks("plan", title, steps)` to create a structured plan that persists across context.
+
 **Stop here and show the plan if the task is complex or high-risk.**
 
 ## Phase 3 — Implement
-- Work through the plan in order.
-- After each meaningful step: run tests, check types.
+- Work through the plan in order. Use `tasks("check", step)` as you complete each step.
+- After each meaningful step: run tests, run `nvim_diagnostics` on changed files.
 - If something invalidates the plan — stop, reassess, update the plan.
 - Checkpoint with `git add -A && git stash` before risky changes.
 
 ## Phase 4 — Verify
 - Run the full test suite.
-- Check types: `npx tsc --noEmit`.
+- Run `nvim_diagnostics` on all changed files.
 - Read the full diff: `git diff HEAD`.
 - If auto-verify fires — fix before finishing.
 

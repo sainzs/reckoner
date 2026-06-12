@@ -6,7 +6,7 @@ import { truncateToWidth } from "@mariozechner/pi-tui"
  * Harness footer: unified status line replacing scattered setStatus calls.
  *
  * Layout:
- *   main (clean) │ verify ✓ │ nvim ✓ │ 🔨 build │ turn 3 │ ↑12.3k ↓2.1k $0.042
+ *   main │ VERIFY READY │ NVIM READY │ BUILD │ turn 3 │ ↑12.3k ↓2.1k $0.042
  *
  * Consolidates status from: workspace-context, auto-verify, nvim-server,
  * plan-mode, git-checkpoint. Adds token usage and cost from session data.
@@ -59,8 +59,10 @@ export default function harnessFooterExtension(pi: ExtensionAPI) {
           // Verify status
           const verify = statuses.get("verify")
           if (verify) {
-            const color = verify.includes("issues") ? "warning"
-              : verify.includes("✓") ? "success"
+            const color = verify.includes("ISSUES") ? "warning"
+              : verify.includes("RUNNING") ? "accent"
+              : verify.includes("READY") ? "success"
+              : verify.includes("OFF") ? "dim"
               : "dim"
             parts.push(theme.fg(color, verify))
           }
@@ -68,7 +70,11 @@ export default function harnessFooterExtension(pi: ExtensionAPI) {
           // Nvim status
           const nvim = statuses.get("nvim-server") || statuses.get("nvim")
           if (nvim) {
-            const color = nvim.includes("✓") ? "success" : "dim"
+            const color = nvim.includes("READY") || nvim.includes("REUSED") ? "success"
+              : nvim.includes("STARTING") ? "accent"
+              : nvim.includes("UNAVAILABLE") || nvim.includes("MISSING") || nvim.includes("TIMEOUT") || nvim.includes("FAILED")
+                ? "warning"
+                : "dim"
             parts.push(theme.fg(color, nvim))
           }
 

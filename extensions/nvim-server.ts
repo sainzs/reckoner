@@ -33,6 +33,20 @@ const EXEC_TIMEOUT = 15_000
 
 export default function nvimServerExtension(pi: ExtensionAPI) {
   let serverPid: number | null = null
+  let ownedByUs = false // true if we spawned the server this session
+
+  function cleanup() {
+    if (ownedByUs && serverPid) {
+      try { process.kill(serverPid) } catch {}
+      try { unlinkSync(SOCKET_PATH) } catch {}
+      serverPid = null
+      ownedByUs = false
+    }
+  }
+
+  process.on("exit", cleanup)
+  process.on("SIGTERM", cleanup)
+  process.on("SIGINT", cleanup)
 
   /** Check if the server socket exists and nvim responds */
   async function isServerReady(): Promise<boolean> {
@@ -60,14 +74,14 @@ export default function nvimServerExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     // Don't start if nvim or config is missing
     if (!existsSync(RECKONER_NVIM_INIT)) {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "no config")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM UNAVAILABLE")
       return
     }
 
     try {
       await pi.exec("nvim", ["--version"], { timeout: 3000 })
     } catch {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim not found")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM MISSING")
       return
     }
 
@@ -76,7 +90,7 @@ export default function nvimServerExtension(pi: ExtensionAPI) {
       const alreadyRunning = await isServerReady()
       if (alreadyRunning) {
         // Reuse existing server
-        if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim ✓ (reused)")
+        if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM REUSED")
         pi.events.emit("reckoner:nvim-ready", { socket: SOCKET_PATH })
         return
       }
@@ -84,7 +98,7 @@ export default function nvimServerExtension(pi: ExtensionAPI) {
     }
 
     // Start the server
-    if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim starting…")
+    if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM STARTING")
 
     try {
       const { spawn } = await import("node:child_process")
@@ -97,9 +111,10 @@ export default function nvimServerExtension(pi: ExtensionAPI) {
         stdio: "ignore",
       })
       serverPid = child.pid ?? null
+      ownedByUs = true
       child.unref()
     } catch {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim: spawn failed")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM FAILED")
       return
     }
 
@@ -115,10 +130,10 @@ export default function nvimServerExtension(pi: ExtensionAPI) {
     }
 
     if (ready) {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim ✓")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM READY")
       pi.events.emit("reckoner:nvim-ready", { socket: SOCKET_PATH })
     } else {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "nvim: timeout")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim-server", "NVIM TIMEOUT")
       // Kill the process if it didn't start properly
       if (serverPid) {
         try { process.kill(serverPid) } catch {}

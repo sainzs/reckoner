@@ -12,7 +12,8 @@ description: Reviews a staged or branch diff for correctness, regressions, secur
 
 ## Read before judging
 Read the full context of changed files, not just the hunks. A two-line change can break invariants
-established 100 lines away.
+established 100 lines away. Use `nvim_symbols` to see the declaration surface of changed files.
+Use `sg_search` or `nvim_references` to find callers of changed functions.
 
 ## Checklist (in priority order)
 1. **Correctness** — does the logic do what it claims? Edge cases, off-by-ones, wrong assumptions.
@@ -27,4 +28,5 @@ established 100 lines away.
 - Lead with the highest-severity finding.
 - Cite specific file + line + behavior.
 - If something is fine, say it's fine — don't pad with non-issues.
+- Run `nvim_diagnostics` on changed files — real LSP errors catch what eyeballing misses.
 - End with: what you would test next if you were merging this.

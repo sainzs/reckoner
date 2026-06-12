@@ -69,7 +69,8 @@ These are not independent features. They are organs in one system.
 | `plan-mode.ts` | Plan/build toggle. Earn the right to edit. |
 | `tasks.ts` | Structured task plans that survive context compression. |
 | `nvim-server.ts` | Persistent headless nvim. LSP stays warm across requests. |
-| `harness-widget.ts` | Orientation widget above editor. Task + memory + status at a glance. |
+| `inject.ts` | Deterministic system prompt assembly. Collects injections by priority. |
+| `harness-widget.ts` | Orientation widget above editor. Task + memory at a glance. |
 | `harness-footer.ts` | Unified footer with consolidated status + token usage. |
 | `harness-overlay.ts` | Ctrl+O orientation overlay. Full memory/task browser. |
 | `ast-grep.ts` | Structural code search + rewrite via AST patterns. |
@@ -100,7 +101,9 @@ Extensions communicate through `pi.events`, not imports.
 
 | Event | Emitter | Listener | Payload |
 |-------|---------|----------|---------|
+| `reckoner:nvim-ready` | nvim-server | nvim-tools, auto-verify, harness-footer | `{ socket }` |
 | `reckoner:lesson` | auto-verify | memory | `{ type, errorKind, files, summary, fixed, timestamp }` |
+| `reckoner:register-injection` | 5 extensions | inject.ts | `{ key, priority, build: () => string }` |
 
 ## Project structure
 
@@ -108,22 +111,25 @@ Extensions communicate through `pi.events`, not imports.
 reckoner/
 ├── genesis.md               # founding document — identity and principles
 ├── extensions/              # the system
+│   ├── inject.ts            # deterministic system prompt assembly
 │   ├── auto-verify.ts       # catches errors, emits lessons
-│   ├── memory.ts            # stores lessons, injects into sessions
-│   ├── principles.ts        # behavioral guidelines
-│   ├── workspace-context.ts # git state in system prompt
-│   ├── repo-map.ts          # structural codebase overview
+│   ├── memory.ts            # stores lessons, registers injection
+│   ├── principles.ts        # behavioral guidelines, registers injection
+│   ├── workspace-context.ts # git state, registers injection
+│   ├── repo-map.ts          # structural overview (ast-grep + rg fallback)
 │   ├── nvim-tools.ts        # neovim headless LSP + treesitter
 │   ├── web-tools.ts         # web_fetch + web_search
 │   ├── git-checkpoint.ts    # stash before/after every turn
 │   ├── guardrails.ts        # block dangerous paths and commands
-│   ├── plan-mode.ts         # plan/build toggle (Ctrl+T)
-│   ├── tasks.ts             # structured task tracking
+│   ├── plan-mode.ts         # plan/build toggle, registers injection
+│   ├── tasks.ts             # structured task tracking, registers injection
 │   ├── nvim-server.ts       # persistent headless nvim server
-│   ├── harness-widget.ts    # orientation widget (the cockpit)
+│   ├── harness-widget.ts    # orientation widget (task + memory)
 │   ├── harness-footer.ts    # unified custom footer
 │   ├── harness-overlay.ts   # orientation overlay (Ctrl+O)
-│   └── ast-grep.ts          # structural code search/rewrite
+│   ├── ast-grep.ts          # structural code search/rewrite
+│   └── lib/                 # shared utilities (not extensions)
+│       └── parse-plan.ts    # task plan parser (used by 3 extensions)
 ├── nvim/
 │   └── init.lua             # minimal nvim config for headless
 ├── skills/                  # task-specific instructions
@@ -141,7 +147,7 @@ reckoner/
 - Each extension is a single `.ts` file with a default export function
 - Use `StringEnum` from `@mariozechner/pi-ai` for tool parameter enums (NOT `Type.Union`/`Type.Literal`)
 - Commit messages: `feat:`, `fix:`, `docs:` prefixes
-- Extensions communicate through `pi.events`, never through imports
+- Extensions communicate through `pi.events`, never through imports (shared utilities in `lib/` are OK)
 
 ## Key technical decisions
 
@@ -159,6 +165,9 @@ reckoner/
 | Injection prioritizes mistakes | Most valuable for the loop. Journal is least valuable. |
 | `StringEnum` everywhere | `Type.Union`/`Type.Literal` breaks Google API. |
 | Git checkpoint via `stash create` | Non-destructive. Stages untracked files first. |
+| Injection via event registration | Deterministic prompt order (principles→workspace→tasks→memory→plan-mode). |
+| repo-map prefers ast-grep | AST-aware symbols catch arrow functions and destructured exports. rg fallback. |
+| Shared utilities in `lib/` | `parse-plan.ts` avoids 3-way duplication. Not cross-extension coupling. |
 
 ## Task tracking
 

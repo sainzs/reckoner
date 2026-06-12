@@ -166,6 +166,15 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (ctx.hasUI) {
       ctx.ui.setStatus("memory", existsSync(dir) ? "memory on" : "memory ready")
     }
+
+    pi.events.emit("reckoner:register-injection", {
+      key: "memory",
+      priority: 40,
+      build: () => {
+        if (!dir) return ""
+        return buildInjection(dir) ?? ""
+      },
+    })
   })
 
   // Listen for lessons from auto-verify — the loop closes here
@@ -179,13 +188,6 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (recentMistakes.some((entry) => entry.includes(note))) return
 
     appendNote(dir, "mistakes", note)
-  })
-
-  pi.on("before_agent_start", async (event, _ctx) => {
-    if (!dir) return
-    const injection = buildInjection(dir)
-    if (!injection) return
-    return { systemPrompt: `${event.systemPrompt}${injection}` }
   })
 
   pi.registerTool({

@@ -42,11 +42,11 @@ export default function astGrepExtension(pi: ExtensionAPI) {
       const result = await pi.exec("ast-grep", ["--version"], { timeout: 3000 })
       available = (result.stdout ?? "").includes("ast-grep")
       if (ctx.hasUI) {
-        ctx.ui.setStatus("sg", available ? "sg ✓" : "sg: not found")
+        ctx.ui.setStatus("sg", available ? "SG READY" : "SG MISSING")
       }
     } catch {
       available = false
-      if (ctx.hasUI) ctx.ui.setStatus("sg", "sg: not found")
+      if (ctx.hasUI) ctx.ui.setStatus("sg", "SG MISSING")
     }
   })
 

@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { parsePlan } from "./lib/parse-plan.js"
 
 /**
  * Harness overlay: full orientation panel triggered by Ctrl+O.
@@ -30,20 +31,6 @@ function readEntries(dir: string, category: string, max: number): string[] {
   return blocks.slice(-max).map(b => b.trim())
 }
 
-function parsePlan(content: string): { title: string, steps: { text: string, checked: boolean }[] } | null {
-  const lines = content.split(/\r?\n/)
-  let title = ""
-  const steps: { text: string, checked: boolean }[] = []
-  for (const line of lines) {
-    const tm = line.match(/^#\s+(.+)/)
-    if (tm && !title) { title = tm[1].trim(); continue }
-    const sm = line.match(/^- \[([ xX])\]\s+(.+)/)
-    if (sm) steps.push({ checked: sm[1] !== " ", text: sm[2].trim() })
-  }
-  if (!title && steps.length === 0) return null
-  return { title: title || "Untitled", steps }
-}
-
 function buildSections(cwd: string): Section[] {
   const sections: Section[] = []
   const memDir = join(cwd, ".pi", "memory")
@@ -58,9 +45,9 @@ function buildSections(cwd: string): Section[] {
         const done = plan.steps.filter(s => s.checked).length
         const lines = [`${plan.title} (${done}/${plan.steps.length})`]
         for (const step of plan.steps) {
-          lines.push(step.checked ? `  ✓ ${step.text}` : `  ○ ${step.text}`)
+          lines.push(step.checked ? `  [x] ${step.text}` : `  [ ] ${step.text}`)
         }
-        sections.push({ title: "Active Task", lines })
+        sections.push({ title: "ACTIVE TASK", lines })
       }
     }
   }
@@ -84,7 +71,7 @@ function buildSections(cwd: string): Section[] {
 
     const total = readEntries(memDir, cat, 999).length
     sections.push({
-      title: `${cat} (${total})`,
+      title: `${cat.toUpperCase()} (${total})`,
       lines,
     })
   }
@@ -162,15 +149,15 @@ class OrientationOverlay {
     const rendered: string[] = []
 
     // Title
-    rendered.push(truncateToWidth(t.fg("accent", t.bold("── Orientation ──")), width))
+    rendered.push(truncateToWidth(t.fg("accent", t.bold("ORIENTATION")), width))
     rendered.push("")
 
     for (const line of visible) {
       if (line.startsWith("## ")) {
         rendered.push(truncateToWidth(t.fg("accent", t.bold(line.slice(3))), width))
-      } else if (line.startsWith("  ✓")) {
+      } else if (line.startsWith("  [x]")) {
         rendered.push(truncateToWidth(t.fg("success", line), width))
-      } else if (line.startsWith("  ○")) {
+      } else if (line.startsWith("  [ ]")) {
         rendered.push(truncateToWidth(t.fg("dim", line), width))
       } else if (line.startsWith("    ")) {
         rendered.push(truncateToWidth(t.fg("muted", line), width))
@@ -186,7 +173,7 @@ class OrientationOverlay {
     const total = this.allLines.length
     const pos = total > maxLines ? ` ${this.scrollOffset + 1}-${Math.min(this.scrollOffset + maxLines, total)}/${total}` : ""
     rendered.push(truncateToWidth(
-      t.fg("dim", `[esc] close  [j/k] scroll  [g/G] top/bottom${pos}`),
+      t.fg("dim", `[ESC] CLOSE  [J/K] SCROLL  [G/G] TOP/BOTTOM${pos}`),
       width,
     ))
 

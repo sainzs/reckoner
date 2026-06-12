@@ -14,7 +14,9 @@ description: Diagnoses a failing build, test, or runtime issue by reproducing it
 4. Read recent git changes: `git log --oneline -10`, `git diff HEAD~1`.
 5. Read the failing code — the full file, not just the error line.
 6. Identify one subsystem or one file that owns the problem.
-7. If unclear: instrument with logs or bisect with `git bisect` before guessing.
+7. Use `nvim_diagnostics` to see real LSP errors. Use `nvim_references` to trace callers.
+8. Use `sg_search` for structural pattern matching if the bug involves a recurring code shape.
+9. If unclear: instrument with logs or bisect with `git bisect` before guessing.
 
 ## If you're stuck
 - Use `web_search` for the exact error message.
@@ -29,7 +31,7 @@ description: Diagnoses a failing build, test, or runtime issue by reproducing it
 ## Verify
 - Re-run the exact failing command — confirm it passes.
 - Run one nearby passing test — confirm you haven't broken anything adjacent.
-- Check types if TypeScript.
+- Run `nvim_diagnostics` on changed files.
 
 ## After
 - Call `remember("mistakes", ...)` with the root cause and the fix.

@@ -1,20 +1,18 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
-import { StringEnum } from "@mariozechner/pi-ai"
-import { resolve, relative } from "node:path"
+import { resolve } from "node:path"
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { writeFileSync, mkdtempSync, unlinkSync } from "node:fs"
 
 /**
- * Nvim tools: neovim headless as a native code intelligence backend.
+ * Nvim tools: agent-native code intelligence through your real editor stack.
  *
  * Uses the user's actual nvim + treesitter + LSP for:
- *   - Real diagnostics for ANY language (not just tsc)
+ *   - Real diagnostics across any configured language
  *   - AST-aware symbol extraction via treesitter
- *   - Go-to-definition via LSP
- *   - Find references via LSP
- *   - Format files via LSP
+ *   - Definition and reference lookup via LSP
+ *   - Formatting via the editor's existing language tooling
  *
  * Requires:
  *   - nvim 0.10+ with treesitter parsers installed
@@ -27,6 +25,8 @@ const NVIM_TIMEOUT = 25_000
 const LSP_WAIT_SECS = 15
 const SERVER_POLL_INTERVAL = 300 // ms
 const SERVER_POLL_MAX = 30 // attempts (9 seconds max)
+
+let serverQueue: Promise<void> = Promise.resolve()
 
 function nvimArgs(file: string): string[] {
   return [
@@ -41,6 +41,46 @@ function writeLuaScript(code: string): string {
   const path = resolve(dir, "script.lua")
   writeFileSync(path, code, "utf8")
   return path
+}
+
+function vimSingleQuoted(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+async function withServerLock<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = serverQueue.catch(() => undefined)
+  let release: (() => void) | undefined
+  serverQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release?.()
+  }
+}
+
+async function waitForServerBuffer(pi: ExtensionAPI, socket: string, file: string, maxPoll = 10): Promise<boolean> {
+  for (let i = 0; i < maxPoll; i++) {
+    try {
+      const result = await pi.exec("nvim", [
+        "--server", socket,
+        "--remote-expr", 'expand("%:p")',
+      ], { timeout: 3000 })
+
+      if ((result.stdout ?? "").trim() === file) {
+        return true
+      }
+    } catch {
+      return false
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, SERVER_POLL_INTERVAL))
+  }
+
+  return false
 }
 
 // ─── Spawn path (slow fallback) ─────────────────────────────
@@ -76,47 +116,49 @@ async function runOnServer(
   luaCode: string,
   maxPoll: number = SERVER_POLL_MAX,
 ): Promise<string | null> {
-  const scriptPath = writeLuaScript(luaCode)
-  try {
-    // Clear previous result
-    await pi.exec("nvim", [
-      "--server", socket,
-      "--remote-expr", `execute("let g:_reckoner_result = ''")`,
-    ], { timeout: 3000 })
-
-    // Open the file
-    const escaped = file.replace(/"/g, '\\"')
-    await pi.exec("nvim", [
-      "--server", socket,
-      "--remote-expr", `execute("edit ${escaped}")`,
-    ], { timeout: 5000 })
-
-    // Execute the Lua script
-    await pi.exec("nvim", [
-      "--server", socket,
-      "--remote-expr", `execute("luafile ${scriptPath}")`,
-    ], { timeout: 5000 })
-
-    // Poll for result
-    for (let i = 0; i < maxPoll; i++) {
-      await new Promise(r => setTimeout(r, SERVER_POLL_INTERVAL))
-
-      const result = await pi.exec("nvim", [
+  return withServerLock(async () => {
+    const scriptPath = writeLuaScript(luaCode)
+    try {
+      // Shared server state (current buffer + g:_reckoner_result) means requests
+      // must be serialized. Otherwise parallel calls can read each other's file/result.
+      await pi.exec("nvim", [
         "--server", socket,
-        "--remote-expr", "g:_reckoner_result",
+        "--remote-expr", `execute("let g:_reckoner_result = ''")`,
       ], { timeout: 3000 })
 
-      const raw = (result.stdout ?? "").trim()
-      if (raw && raw !== "" && raw !== "0") {
-        return raw
+      await pi.exec("nvim", [
+        "--server", socket,
+        "--remote-expr", `execute("edit " . fnameescape('${vimSingleQuoted(file)}'))`,
+      ], { timeout: 5000 })
+
+      const ready = await waitForServerBuffer(pi, socket, file)
+      if (!ready) return null
+
+      await pi.exec("nvim", [
+        "--server", socket,
+        "--remote-expr", `execute("luafile " . fnameescape('${vimSingleQuoted(scriptPath)}'))`,
+      ], { timeout: 5000 })
+
+      for (let i = 0; i < maxPoll; i++) {
+        await new Promise((resolve) => setTimeout(resolve, SERVER_POLL_INTERVAL))
+
+        const result = await pi.exec("nvim", [
+          "--server", socket,
+          "--remote-expr", "g:_reckoner_result",
+        ], { timeout: 3000 })
+
+        const raw = (result.stdout ?? "").trim()
+        if (raw && raw !== "" && raw !== "0") {
+          return raw
+        }
       }
+      return null
+    } catch {
+      return null
+    } finally {
+      try { unlinkSync(scriptPath) } catch {}
     }
-    return null // timeout
-  } catch {
-    return null // server error
-  } finally {
-    try { unlinkSync(scriptPath) } catch {}
-  }
+  })
 }
 
 // ─── Lua script templates ───────────────────────────────────
@@ -333,9 +375,11 @@ const SERVER_LUA_SYMBOLS = `
 vim.schedule(function()
   local ok, parser = pcall(vim.treesitter.get_parser, 0)
   if not ok or not parser then
-    vim.g._reckoner_result = "ERROR: treesitter parser not available"
+    vim.g._reckoner_result = "ERROR: treesitter parser not available for " .. vim.api.nvim_buf_get_name(0)
     return
   end
+  -- Force fresh parse after buffer switch — cached trees may belong to previous buffer
+  parser:invalidate()
   local tree = parser:parse()[1]
   local root = tree:root()
   local out = {}
@@ -461,9 +505,9 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (!existsSync(RECKONER_NVIM_INIT)) {
       if (ctx.hasUI) {
-        ctx.ui.setStatus("nvim", "nvim: no config")
+        ctx.ui.setStatus("nvim", "⚠️ nvim unavailable")
         ctx.ui.notify(
-          `Reckoner nvim config not found at ${RECKONER_NVIM_INIT}.\nNvim tools will be unavailable.`,
+          `Reckoner nvim config not found at ${RECKONER_NVIM_INIT}.\nNvim-backed tools won't be available in this session.`,
           "warning",
         )
       }
@@ -473,9 +517,9 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     // Quick check: is nvim available?
     try {
       await pi.exec("nvim", ["--version"], { timeout: 3000 })
-      if (ctx.hasUI) ctx.ui.setStatus("nvim", "nvim ✓")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim", "✅ nvim ready")
     } catch {
-      if (ctx.hasUI) ctx.ui.setStatus("nvim", "nvim: not found")
+      if (ctx.hasUI) ctx.ui.setStatus("nvim", "⚠️ nvim missing")
     }
   })
 
@@ -485,11 +529,11 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     name: "nvim_diagnostics",
     label: "Nvim Diagnostics",
     description:
-      "Get LSP diagnostics for a file using neovim's built-in LSP client. Works for ANY language with a configured language server (TypeScript, Python, Go, Rust, etc.). More comprehensive than just running tsc.",
-    promptSnippet: "Get real LSP diagnostics for any file via neovim",
+      "Get the editor's real diagnostics for a file through neovim's LSP client. Uses the same language tooling you already rely on, not a stripped-down fallback.",
+    promptSnippet: "Pull real editor diagnostics from neovim",
     promptGuidelines: [
-      "Use nvim_diagnostics after editing files to check for errors beyond just TypeScript.",
-      "Prefer nvim_diagnostics over running tsc when working with non-TypeScript files.",
+      "Use nvim_diagnostics after edits when you need the editor's actual diagnostic picture.",
+      "Prefer nvim_diagnostics over language-specific CLI checks when working across multiple stacks.",
     ],
     parameters: Type.Object({
       path: Type.String({ description: "Path to the file to check" }),
@@ -523,11 +567,11 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     name: "nvim_symbols",
     label: "Nvim Symbols",
     description:
-      "Extract all declarations (functions, classes, types, interfaces, variables) from a file using treesitter AST parsing. Faster and more accurate than regex-based approaches.",
-    promptSnippet: "Get AST-accurate symbols from a file via treesitter",
+      "Extract the declaration surface of a file with treesitter. Fast, structural, and aligned with the editor instead of regex heuristics.",
+    promptSnippet: "Map a file's symbol surface through treesitter",
     promptGuidelines: [
-      "Use nvim_symbols to understand a file's structure before editing it.",
-      "Prefer nvim_symbols over reading the entire file when you just need the API surface.",
+      "Use nvim_symbols when you need the shape of a file before making changes.",
+      "Prefer nvim_symbols over reading the whole file when structure is what matters.",
     ],
     parameters: Type.Object({
       path: Type.String({ description: "Path to the file to analyze" }),
@@ -560,8 +604,8 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     name: "nvim_definition",
     label: "Nvim Go to Definition",
     description:
-      "Go to the definition of a symbol at a specific location using LSP. Returns the file and line where the symbol is defined.",
-    promptSnippet: "Find where a symbol is defined via LSP",
+      "Resolve where a symbol is defined using neovim's attached LSP clients. Returns the destination file and position.",
+    promptSnippet: "Resolve a symbol definition through the editor",
     parameters: Type.Object({
       path: Type.String({ description: "File containing the symbol" }),
       line: Type.Number({ description: "Line number (1-indexed)" }),
@@ -595,8 +639,8 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     name: "nvim_references",
     label: "Nvim Find References",
     description:
-      "Find all references to a symbol at a specific location using LSP. Returns every file and line that references the symbol.",
-    promptSnippet: "Find all references to a symbol via LSP",
+      "Find every reference to a symbol through the editor's LSP graph. Returns each file and line that participates.",
+    promptSnippet: "Pull the full reference set for a symbol",
     parameters: Type.Object({
       path: Type.String({ description: "File containing the symbol" }),
       line: Type.Number({ description: "Line number (1-indexed)" }),
@@ -630,8 +674,8 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
     name: "nvim_format",
     label: "Nvim Format",
     description:
-      "Format a file using nvim's LSP formatting. Uses whatever formatter the language server provides.",
-    promptSnippet: "Format a file using LSP via neovim",
+      "Format a file through neovim using the language tooling already configured in the editor.",
+    promptSnippet: "Format a file through the editor stack",
     parameters: Type.Object({
       path: Type.String({ description: "Path to the file to format" }),
     }),

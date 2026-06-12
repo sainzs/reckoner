@@ -112,16 +112,11 @@ export default function workspaceContextExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await refresh(ctx)
-  })
-
-  pi.on("before_agent_start", async (event, ctx) => {
-    const current = snapshot ?? (await refresh(ctx))
-    if (!current) return
-
-    const extra = buildPromptBlock(current)
-    return {
-      systemPrompt: `${event.systemPrompt}${extra}`,
-    }
+    pi.events.emit("reckoner:register-injection", {
+      key: "workspace-context",
+      priority: 20,
+      build: () => snapshot ? buildPromptBlock(snapshot) : "",
+    })
   })
 
   pi.registerCommand("snapshot", {

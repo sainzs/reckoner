@@ -215,7 +215,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     testRunner = await detectTestRunner(pi, ctx.cwd)
     if (ctx.hasUI) {
-      ctx.ui.setStatus("verify", enabled ? "verify on" : "verify off")
+      ctx.ui.setStatus("verify", enabled ? "VERIFY READY" : "VERIFY OFF")
     }
   })
 
@@ -247,7 +247,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
     const testFailures: string[] = []
 
     if (ctx.hasUI) {
-      ctx.ui.setStatus("verify", "verifying…")
+      ctx.ui.setStatus("verify", "VERIFY RUNNING")
     }
 
     // --- Type checking ---
@@ -346,7 +346,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
       verifyCycles++
       const touched = touchedFiles.join(", ")
       const summary = [
-        `⚠ Auto-verify after editing ${touched}:`,
+        `AUTO-VERIFY detected issues after editing ${touched}:`,
         "",
         ...diagnostics,
         "",
@@ -366,7 +366,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
     }
 
     if (ctx.hasUI) {
-      const label = diagnostics.length > 0 ? `verify: issues found` : "verify ✓"
+      const label = diagnostics.length > 0 ? "VERIFY ISSUES" : "VERIFY READY"
       ctx.ui.setStatus("verify", label)
     }
   })
@@ -422,7 +422,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
       }
 
       if (ctx.hasUI) {
-        ctx.ui.setStatus("verify", enabled ? "verify on" : "verify off")
+        ctx.ui.setStatus("verify", enabled ? "VERIFY READY" : "VERIFY OFF")
       }
     },
   })

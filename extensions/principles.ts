@@ -39,9 +39,11 @@ Tests should describe behavior, not just cover lines. The code will be read more
 `.trim()
 
 export default function principlesExtension(pi: ExtensionAPI) {
-  pi.on("before_agent_start", async (event) => {
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${PRINCIPLES}`,
-    }
+  pi.on("session_start", async () => {
+    pi.events.emit("reckoner:register-injection", {
+      key: "principles",
+      priority: 10,
+      build: () => `\n\n${PRINCIPLES}`,
+    })
   })
 }

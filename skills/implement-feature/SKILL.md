@@ -9,7 +9,8 @@ description: Implements a user-requested code change by gathering context, makin
 1. Read `AGENTS.md` and `README.md` — understand the rules of this codebase.
 2. Run `recall()` for anything related to this feature — past decisions, patterns, known mistakes.
 3. Read every file you intend to edit. The whole thing. No partial reads before editing.
-4. If you're unfamiliar with a library or API, use `web_fetch` or `web_search` before guessing.
+4. Use `repo_map` to see the file tree and `nvim_symbols` for declaration surfaces.
+5. If you're unfamiliar with a library or API, use `web_fetch` or `web_search` before guessing.
 
 ## Plan first
 Before any edit, state:
@@ -25,7 +26,7 @@ Before any edit, state:
 
 ## Verify
 - Run the most targeted test first: `npm test -- --testPathPattern=<file>` or equivalent.
-- If TypeScript: check types compile with `npx tsc --noEmit`.
+- Run `nvim_diagnostics` on changed files for real LSP errors.
 - Look at `git diff` before reporting done. Actually read it.
 - If auto-verify fires errors — fix them before finishing.
 

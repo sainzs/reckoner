@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import { StringEnum } from "@mariozechner/pi-ai"
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs"
 import { join, dirname } from "node:path"
 
 /**
@@ -27,17 +27,9 @@ import { join, dirname } from "node:path"
  * Injection: active task summary at before_agent_start
  */
 
+import { parsePlan, type TaskPlan } from "./lib/parse-plan.js"
+
 const ACTIONS = ["plan", "check", "add", "view", "done"] as const
-
-interface Step {
-  text: string
-  checked: boolean
-}
-
-interface TaskPlan {
-  title: string
-  steps: Step[]
-}
 
 function tasksFile(cwd: string): string {
   return join(cwd, ".pi", "tasks.md")
@@ -46,31 +38,6 @@ function tasksFile(cwd: string): string {
 function ensureDir(path: string) {
   const dir = dirname(path)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-}
-
-function parsePlan(content: string): TaskPlan | null {
-  const lines = content.split(/\r?\n/)
-  let title = ""
-  const steps: Step[] = []
-
-  for (const line of lines) {
-    const titleMatch = line.match(/^#\s+(.+)/)
-    if (titleMatch && !title) {
-      title = titleMatch[1].trim()
-      continue
-    }
-
-    const stepMatch = line.match(/^- \[([ xX])\]\s+(.+)/)
-    if (stepMatch) {
-      steps.push({
-        checked: stepMatch[1] !== " ",
-        text: stepMatch[2].trim(),
-      })
-    }
-  }
-
-  if (!title && steps.length === 0) return null
-  return { title: title || "Untitled", steps }
 }
 
 function formatPlan(plan: TaskPlan): string {
@@ -136,30 +103,28 @@ export default function tasksExtension(pi: ExtensionAPI) {
         const plan = content ? parsePlan(content) : null
         if (plan && plan.steps.length > 0) {
           const done = plan.steps.filter(s => s.checked).length
-          ctx.ui.setStatus("tasks", `task: ${done}/${plan.steps.length}`)
+          ctx.ui.setStatus("tasks", `TASK ${done}/${plan.steps.length}`)
         } else {
-          ctx.ui.setStatus("tasks", "no task")
+          ctx.ui.setStatus("tasks", "TASK NONE")
         }
       } else {
-        ctx.ui.setStatus("tasks", "no task")
+        ctx.ui.setStatus("tasks", "TASK NONE")
       }
     }
-  })
 
-  pi.on("before_agent_start", async (event) => {
-    const file = tasksFile(cwd)
-    if (!existsSync(file)) return
-
-    const content = readFileSync(file, "utf8")
-    const plan = parsePlan(content)
-    if (!plan || plan.steps.length === 0) return
-
-    // Only inject if there are unchecked steps
-    const hasWork = plan.steps.some(s => !s.checked)
-    if (!hasWork) return
-
-    const injection = `\n\n---\n${injectionSummary(plan)}\n---`
-    return { systemPrompt: `${event.systemPrompt}${injection}` }
+    pi.events.emit("reckoner:register-injection", {
+      key: "tasks",
+      priority: 30,
+      build: () => {
+        const f = tasksFile(cwd)
+        if (!existsSync(f)) return ""
+        const content = readFileSync(f, "utf8")
+        const plan = parsePlan(content)
+        if (!plan || plan.steps.length === 0) return ""
+        if (!plan.steps.some(s => !s.checked)) return ""
+        return `\n\n---\n${injectionSummary(plan)}\n---`
+      },
+    })
   })
 
   pi.registerTool({
@@ -263,7 +228,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
         return {
           content: [{
             type: "text" as const,
-            text: `✓ ${match.text}\n\n${statusSummary(plan)}`,
+            text: `COMPLETE: ${match.text}\n\n${statusSummary(plan)}`,
           }],
           details: { checked: match.text, progress: `${done}/${plan.steps.length}` },
         }
@@ -351,7 +316,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
         writeFileSync(archiveFile, existing + archiveEntry, "utf8")
 
         // Remove the active plan
-        writeFileSync(file, "", "utf8")
+        try { unlinkSync(file) } catch {}
 
         return {
           content: [{
@@ -385,7 +350,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
       const lines = [`# ${plan.title}`, ""]
       for (const step of plan.steps) {
-        const mark = step.checked ? "✓" : "○"
+        const mark = step.checked ? "[x]" : "[ ]"
         lines.push(`  ${mark} ${step.text}`)
       }
       const done = plan.steps.filter(s => s.checked).length
