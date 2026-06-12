@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { resolve, relative, dirname, basename } from "node:path"
-import { existsSync } from "node:fs"
+import { existsSync, writeFileSync, mkdtempSync, unlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
 
 /**
  * Auto-verify: runs type checking and related tests after turns that edit files.
@@ -11,6 +12,7 @@ import { existsSync } from "node:fs"
  * - On turn_end: finds and runs test files near modified files
  * - Injects diagnostic errors as a steering message
  * - Limits to 2 verify cycles per agent run to prevent loops
+ * - Runs nvim diagnostics on non-TypeScript files (Python, Go, Rust, etc.)
  * - Emits `reckoner:lesson` via pi.events when errors are caught
  * - Toggle with /verify on|off
  */
@@ -24,6 +26,65 @@ let resolvedCaughtErrors = false
 const MAX_VERIFY_CYCLES = 2
 const TSC_TIMEOUT = 30_000
 const TEST_TIMEOUT = 30_000
+const NVIM_TIMEOUT = 20_000
+const NVIM_LSP_WAIT = 12
+
+// File extensions covered by tsc (don't also nvim-check these)
+const TSC_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts"])
+
+const RECKONER_NVIM_INIT = resolve(process.env.HOME ?? "~", "Code/reckoner/nvim/init.lua")
+
+/** Run a Lua script in headless nvim against a file. Returns stdout. */
+async function runNvimDiagnostics(
+  pi: ExtensionAPI,
+  file: string,
+): Promise<string[]> {
+  if (!existsSync(RECKONER_NVIM_INIT)) return []
+
+  const luaCode = `
+local attempts = 0
+local timer = vim.uv.new_timer()
+timer:start(1000, 1000, vim.schedule_wrap(function()
+  attempts = attempts + 1
+  local diags = vim.diagnostic.get(0)
+  if #diags > 0 or attempts > ${NVIM_LSP_WAIT} then
+    timer:stop()
+    timer:close()
+    local errors = {}
+    for _, d in ipairs(diags) do
+      if d.severity == 1 then -- ERROR only
+        table.insert(errors, string.format("L%d: %s", d.lnum + 1, d.message:sub(1, 200)))
+      end
+    end
+    if #errors > 0 then
+      io.write(table.concat(errors, "\\n"))
+    end
+    vim.cmd("qa!")
+  end
+end))
+`
+
+  const dir = mkdtempSync(resolve(tmpdir(), "reckoner-verify-"))
+  const scriptPath = resolve(dir, "diag.lua")
+  writeFileSync(scriptPath, luaCode, "utf8")
+
+  try {
+    const result = await pi.exec("nvim", [
+      "-u", RECKONER_NVIM_INIT,
+      "--headless",
+      file,
+      "-c", `luafile ${scriptPath}`,
+    ], { timeout: NVIM_TIMEOUT })
+
+    const output = (result.stdout ?? "").trim()
+    if (!output) return []
+    return output.split(/\r?\n/).filter(Boolean)
+  } catch {
+    return []
+  } finally {
+    try { unlinkSync(scriptPath) } catch {}
+  }
+}
 
 function parseTscErrors(raw: string, touched: Set<string>, cwd: string): string[] {
   const lines = raw.split(/\r?\n/).filter(Boolean)
@@ -183,6 +244,28 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
           }
         } catch {
           // Tests failed to run — don't block
+        }
+      }
+    }
+
+    // --- Nvim diagnostics for non-TypeScript files ---
+    const nonTsFiles = [...modifiedFiles].filter(f => {
+      const ext = f.slice(f.lastIndexOf("."))
+      return !TSC_EXTENSIONS.has(ext) || !hasTsConfig
+    })
+
+    if (nonTsFiles.length > 0) {
+      // Check up to 3 files to avoid slow nvim startup overhead
+      for (const file of nonTsFiles.slice(0, 3)) {
+        const absPath = resolve(cwd, file)
+        if (!existsSync(absPath)) continue
+
+        const errors = await runNvimDiagnostics(pi, absPath)
+        if (errors.length > 0) {
+          const rel = relative(cwd, absPath)
+          const prefixed = errors.slice(0, 5).map(e => `→ ${rel}:${e}`)
+          typeErrors.push(...prefixed)
+          diagnostics.push(`**LSP errors in ${rel} (${errors.length}):**`, ...prefixed)
         }
       }
     }

@@ -132,13 +132,16 @@ export default function tasksExtension(pi: ExtensionAPI) {
     const file = tasksFile(cwd)
     if (ctx.hasUI) {
       if (existsSync(file)) {
-        const plan = parsePlan(readFileSync(file, "utf8"))
+        const content = readFileSync(file, "utf8").trim()
+        const plan = content ? parsePlan(content) : null
         if (plan && plan.steps.length > 0) {
           const done = plan.steps.filter(s => s.checked).length
           ctx.ui.setStatus("tasks", `task: ${done}/${plan.steps.length}`)
         } else {
           ctx.ui.setStatus("tasks", "no task")
         }
+      } else {
+        ctx.ui.setStatus("tasks", "no task")
       }
     }
   })
