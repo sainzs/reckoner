@@ -57,7 +57,7 @@ These are not independent features. They are organs in one system.
 
 | Extension | Role in the loop |
 |-----------|-----------------|
-| `auto-verify.ts` | Catches errors after edits. Emits `reckoner:lesson` events. |
+| `auto-verify.ts` | Catches errors after edits (tsc + nvim LSP). Emits `reckoner:lesson` events. |
 | `memory.ts` | Listens for lessons. Writes to disk. Injects into next session. |
 | `principles.ts` | Injects behavioral guidelines. The agent's judgment. |
 | `workspace-context.ts` | Git state + package info. Orientation before action. |
@@ -143,6 +143,7 @@ reckoner/
 | Two-layer memory (storage/injection) | Disk is cheap. Context is expensive. Write liberally, inject surgically. |
 | `pi.events` as nervous system | Extensions don't import each other. Fire-and-forget. Open protocol. |
 | Auto-verify via `turn_end` hook | Runs after all edits in a turn, not per-edit. Max 2 cycles. |
+| Nvim diagnostics in auto-verify | Non-TS files checked via headless nvim LSP. Falls back gracefully. |
 | Lessons emitted at `agent_end` | After the agent has had a chance to fix errors. One event per pattern. |
 | Injection prioritizes mistakes | Most valuable for the loop. Journal is least valuable. |
 | `StringEnum` everywhere | `Type.Union`/`Type.Literal` breaks Google API. |
