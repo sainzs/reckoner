@@ -14,8 +14,7 @@ five minutes, then gone.
 
 ## The thesis
 
-Reckoner is a [pi](https://github.com/mariozechner/pi-coding-agent) package inside
-the `agent-workbench` monorepo that
+Reckoner is a [pi](https://github.com/mariozechner/pi-coding-agent) package that
 closes the feedback loop. When the agent makes an error, it catches it, fixes it,
 and records the pattern. Next session, that lesson is in its context. The agent
 compounds its competence over time instead of resetting to zero.
@@ -60,16 +59,14 @@ The loop is the thesis. These are the organs that support it:
 | **Guardrails** | Blocks writes to `.env`, `~/.ssh`, and key files. Dangerous commands require confirmation. |
 | **Principles** | Behavioral guidelines injected every session. Read before acting, smallest safe change, verify before done. |
 
-## Workbench integration
+## Getting started
 
 ```bash
-cd /Users/sainzs/Code/open-source-work/my-projects/agent-workbench/packages/reckoner
+git clone https://github.com/sainzs/reckoner.git
+cd reckoner
 npm install
 npm run verify:self
 ```
-
-Reckoner is package-local in the unified workbench. Use this package path when wiring
-or testing `pi` package behavior from the monorepo.
 
 ### Requirements
 
@@ -87,13 +84,6 @@ pi -e .
 ```
 
 Runs the package in-place for that session.
-
-### Workbench root context
-
-```bash
-cd /Users/sainzs/Code/open-source-work/my-projects/agent-workbench
-# Reckoner lives at packages/reckoner
-```
 
 ## Usage
 
@@ -177,4 +167,4 @@ It accounts for things. It reasons through the mess.
 
 ---
 
-MIT License
+[MIT License](LICENSE) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
