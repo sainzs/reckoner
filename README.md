@@ -30,7 +30,8 @@ That's it. One loop. Everything else supports it.
 **The agent edits code.** It has full access to your filesystem, shell, and tools.
 
 **Auto-verify catches errors.** After every turn that edits files, the agent checks
-its own work — type errors, test failures. If something breaks, it sees the error
+its own work — type errors via `tsc`, LSP diagnostics via neovim for any language
+(Python, Go, Rust, etc.), and test failures. If something breaks, it sees the error
 and fixes it before telling you it's done.
 
 **Lessons are recorded automatically.** When auto-verify catches an error, the pattern
@@ -107,6 +108,7 @@ Reckoner loads automatically.
 | `/undo` | Restore last git checkpoint. |
 | `/verify` | Toggle auto-verification or check status. |
 | `/memory` | Show what the agent remembers. |
+| `/task` | Show current task plan status. |
 
 ### Tools
 
@@ -122,6 +124,7 @@ Reckoner loads automatically.
 | `nvim_definition` | LSP go-to-definition |
 | `nvim_references` | LSP find-all-references |
 | `nvim_format` | Format a file via LSP |
+| `tasks` | Structured task plans that survive context compression |
 
 ## Memory
 
