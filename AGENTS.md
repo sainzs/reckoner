@@ -68,6 +68,7 @@ These are not independent features. They are organs in one system.
 | `guardrails.ts` | Block dangerous paths and commands. |
 | `plan-mode.ts` | Plan/build toggle. Earn the right to edit. |
 | `tasks.ts` | Structured task plans that survive context compression. |
+| `nvim-server.ts` | Persistent headless nvim. LSP stays warm across requests. |
 
 ## Memory architecture
 
@@ -113,7 +114,8 @@ reckoner/
 │   ├── git-checkpoint.ts    # stash before/after every turn
 │   ├── guardrails.ts        # block dangerous paths and commands
 │   ├── plan-mode.ts         # plan/build toggle (Ctrl+T)
-│   └── tasks.ts             # structured task tracking
+│   ├── tasks.ts             # structured task tracking
+│   └── nvim-server.ts       # persistent headless nvim server
 ├── nvim/
 │   └── init.lua             # minimal nvim config for headless
 ├── skills/                  # task-specific instructions
@@ -144,6 +146,7 @@ reckoner/
 | `pi.events` as nervous system | Extensions don't import each other. Fire-and-forget. Open protocol. |
 | Auto-verify via `turn_end` hook | Runs after all edits in a turn, not per-edit. Max 2 cycles. |
 | Nvim diagnostics in auto-verify | Non-TS files checked via headless nvim LSP. Falls back gracefully. |
+| Persistent nvim server | One server per session, LSP stays warm. 29ms vs 12s per check. |
 | Lessons emitted at `agent_end` | After the agent has had a chance to fix errors. One event per pattern. |
 | Injection prioritizes mistakes | Most valuable for the loop. Journal is least valuable. |
 | `StringEnum` everywhere | `Type.Union`/`Type.Literal` breaks Google API. |

@@ -22,6 +22,7 @@ let verifyCycles = 0
 let enabled = true
 let caughtErrors: { files: string[], errors: string[], type: "type" | "test" }[] = []
 let resolvedCaughtErrors = false
+let nvimServerSocket: string | null = null
 
 const MAX_VERIFY_CYCLES = 2
 const TSC_TIMEOUT = 30_000
@@ -34,8 +35,49 @@ const TSC_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts"])
 
 const RECKONER_NVIM_INIT = resolve(process.env.HOME ?? "~", "Code/reckoner/nvim/init.lua")
 
-/** Run a Lua script in headless nvim against a file. Returns stdout. */
-async function runNvimDiagnostics(
+/** Get LSP diagnostics for a file via the persistent nvim server (fast path). */
+async function runNvimDiagnosticsViaServer(
+  pi: ExtensionAPI,
+  socket: string,
+  file: string,
+): Promise<string[]> {
+  try {
+    // Open the file in the server
+    await pi.exec("nvim", [
+      "--server", socket,
+      "--remote-expr", `execute("edit ${file.replace(/"/g, '\\"')}")`,
+    ], { timeout: 5000 })
+
+    // Poll for diagnostics — LSP may need time to analyze a new file
+    for (let attempt = 0; attempt < NVIM_LSP_WAIT; attempt++) {
+      await new Promise(r => setTimeout(r, 1000))
+      const result = await pi.exec("nvim", [
+        "--server", socket,
+        "--remote-expr",
+        `luaeval("vim.json.encode(vim.tbl_map(function(d) return {s=d.severity, l=d.lnum+1, m=d.message:sub(1,200)} end, vim.diagnostic.get(0)))")`,
+      ], { timeout: 5000 })
+
+      const raw = (result.stdout ?? "").trim()
+      if (!raw || raw === "[]" || raw === "null") continue
+
+      try {
+        const diags = JSON.parse(raw) as { s: number, l: number, m: string }[]
+        const errors = diags
+          .filter(d => d.s === 1) // ERROR only
+          .map(d => `L${d.l}: ${d.m}`)
+        if (errors.length > 0) return errors
+      } catch {
+        continue
+      }
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
+/** Get LSP diagnostics by spawning a fresh headless nvim (slow fallback). */
+async function runNvimDiagnosticsSpawn(
   pi: ExtensionAPI,
   file: string,
 ): Promise<string[]> {
@@ -84,6 +126,21 @@ end))
   } finally {
     try { unlinkSync(scriptPath) } catch {}
   }
+}
+
+/** Get diagnostics — prefer persistent server, fall back to spawn. */
+async function runNvimDiagnostics(
+  pi: ExtensionAPI,
+  file: string,
+): Promise<string[]> {
+  if (nvimServerSocket) {
+    const result = await runNvimDiagnosticsViaServer(pi, nvimServerSocket, file)
+    if (result.length > 0) return result
+    // Server returned nothing — could be no errors, or server died.
+    // Don't fall back to spawn (which would be slow and redundant).
+    return []
+  }
+  return runNvimDiagnosticsSpawn(pi, file)
 }
 
 function parseTscErrors(raw: string, touched: Set<string>, cwd: string): string[] {
@@ -149,6 +206,11 @@ async function detectTestRunner(pi: ExtensionAPI, cwd: string): Promise<string |
 
 export default function autoVerifyExtension(pi: ExtensionAPI) {
   let testRunner: string | null = null
+
+  // Listen for the persistent nvim server
+  pi.events.on("reckoner:nvim-ready", (data: any) => {
+    if (data?.socket) nvimServerSocket = data.socket
+  })
 
   pi.on("session_start", async (_event, ctx) => {
     testRunner = await detectTestRunner(pi, ctx.cwd)

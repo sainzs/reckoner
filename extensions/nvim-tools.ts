@@ -241,6 +241,64 @@ end))
 // ─── Extension ──────────────────────────────────────────────
 
 export default function nvimToolsExtension(pi: ExtensionAPI) {
+  let nvimServerSocket: string | null = null
+
+  // Listen for the persistent nvim server
+  pi.events.on("reckoner:nvim-ready", (data: any) => {
+    if (data?.socket) nvimServerSocket = data.socket
+  })
+
+  /** Fast diagnostics via persistent server. Returns formatted output or null if unavailable. */
+  async function getDiagnosticsViaServer(file: string): Promise<string | null> {
+    if (!nvimServerSocket) return null
+    try {
+      // Open file in server
+      await pi.exec("nvim", [
+        "--server", nvimServerSocket,
+        "--remote-expr", `execute("edit ${file.replace(/"/g, '\\\\"')}")`,
+      ], { timeout: 5000 })
+
+      // Poll for diagnostics
+      for (let i = 0; i < LSP_WAIT_SECS; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        const result = await pi.exec("nvim", [
+          "--server", nvimServerSocket,
+          "--remote-expr",
+          `luaeval("vim.json.encode(vim.tbl_map(function(d) return {s=d.severity, l=d.lnum+1, m=d.message:sub(1,200)} end, vim.diagnostic.get(0)))")`,
+        ], { timeout: 5000 })
+
+        const raw = (result.stdout ?? "").trim()
+        if (!raw || raw === "[]" || raw === "null") continue
+
+        try {
+          const diags = JSON.parse(raw) as { s: number, l: number, m: string }[]
+          if (diags.length > 0) {
+            // Get LSP client info
+            let lspInfo = ""
+            try {
+              const clientResult = await pi.exec("nvim", [
+                "--server", nvimServerSocket,
+                "--remote-expr",
+                `luaeval("vim.json.encode(vim.tbl_map(function(c) return c.name end, vim.lsp.get_clients({bufnr=0})))")`,
+              ], { timeout: 3000 })
+              const clients = JSON.parse((clientResult.stdout ?? "").trim())
+              if (Array.isArray(clients)) lspInfo = clients.map((c: string) => `LSP: ${c}`).join("\n") + "\n"
+            } catch {}
+
+            const lines = diags.map(d => {
+              const sev = (["ERROR", "WARN", "INFO", "HINT"])[d.s - 1] || "?"
+              return `[${sev}] L${d.l}: ${d.m}`
+            })
+            return lspInfo + lines.join("\n")
+          }
+        } catch { continue }
+      }
+      return "No diagnostics found."
+    } catch {
+      return null // server unavailable — caller should fall back
+    }
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     if (!existsSync(RECKONER_NVIM_INIT)) {
       if (ctx.hasUI) {
@@ -281,10 +339,19 @@ export default function nvimToolsExtension(pi: ExtensionAPI) {
       const file = resolve(params.path.replace(/^@/, ""))
       if (!existsSync(file)) throw new Error(`File not found: ${file}`)
 
+      // Prefer persistent server (fast), fall back to spawn (slow)
+      const serverResult = await getDiagnosticsViaServer(file)
+      if (serverResult !== null) {
+        return {
+          content: [{ type: "text" as const, text: serverResult }],
+          details: { file, via: "server" },
+        }
+      }
+
       const output = await runNvimLua(pi, file, LUA_DIAGNOSTICS(LSP_WAIT_SECS), signal)
       return {
         content: [{ type: "text" as const, text: output || "No output from nvim." }],
-        details: { file },
+        details: { file, via: "spawn" },
       }
     },
   })
