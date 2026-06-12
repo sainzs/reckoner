@@ -1,4 +1,4 @@
 node_modules/
-.pi/memory/
+.pi/
 *.local
 .DS_Store
