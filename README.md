@@ -78,6 +78,19 @@ Blocks writes to sensitive paths (`.env`, `~/.ssh`, `~/.aws`, key files). Warns 
 
 Command: `/guardrails on|off`
 
+### `repo-map`
+Structural overview of the codebase — file tree, symbols (functions, classes, types, exports), and architecture. Uses ripgrep for fast scanning. Covers TypeScript, JavaScript, Python, Go, Rust, Java.
+
+The agent calls `repo_map` before diving into files to understand the architecture first. This is the #1 feature that makes Aider effective.
+
+Modes: `tree` (file listing), `symbols` (declarations per file), `overview` (both)
+
+### `plan-mode`
+Switch between Plan mode (read-only analysis) and Build mode (full editing). Inspired by OpenCode's Tab-to-switch pattern. In Plan mode, `edit` and `write` tools are blocked — the agent can only read, search, and analyze.
+
+Commands: `/plan`, `/build`, `/mode`
+Shortcut: `Ctrl+T` to toggle
+
 ### `principles`
 Injects a concise behavioral philosophy before every agent run:
 - Read before acting
@@ -99,6 +112,23 @@ Injects a concise behavioral philosophy before every agent run:
 | `review-diff` | Reviewing changes before merge |
 | `research-docs` | Need to understand a library or API |
 | `plan-and-build` | Non-trivial multi-file work |
+
+---
+
+## Competitive context
+
+| Feature | Reckoner | Claude Code | Aider | OpenCode |
+|---------|----------|-------------|-------|----------|
+| Memory | ✅ remember/recall | ❌ | ❌ | ❌ |
+| Repo map | ✅ rg-based | ❌ | ✅ tree-sitter | ❌ |
+| Auto-verify (tsc+tests) | ✅ | ❌ | ✅ | ✅ LSP |
+| Web research | ✅ Jina | ✅ built-in | ❌ | ✅ |
+| Git safety | ✅ checkpoints | ❌ | ✅ auto-commit | ✅ undo/redo |
+| Plan mode | ✅ Ctrl+T | ❌ | ✅ architect | ✅ Tab |
+| Principles | ✅ | ❌ | ❌ | ❌ |
+| Sub-agents | 🔜 | ❌ | ❌ | ✅ |
+| LSP diagnostics | 🔜 | ❌ | ❌ | ✅ |
+| Context engine | 🔜 | ❌ | ❌ | ❌ |
 
 ---
 
