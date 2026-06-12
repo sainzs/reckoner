@@ -123,6 +123,28 @@ Reckoner loads automatically.
 4. Lessons are recorded automatically — patterns persist to next session
 5. `/undo` if something goes wrong — checkpoints restore the working tree
 
+### Model routing
+
+Reckoner now ships a shared task→model policy in `prompts/model-routing.md` and a matching `model-routing` skill.
+
+| Task | Recommended model |
+|---|---|
+| Plan / architecture / hard debugging | `opencode-go/glm-5` |
+| Build / implementation / tests | `opencode-go/kimi-k2.5` |
+| Explore / search / lookup | `opencode-go/minimax-m2.5` |
+| Review / second pass / verification | `opencode-go/minimax-m2.7` |
+
+**pi**
+- The skill is a guide, not an automatic switcher.
+- Once the OpenCode Go provider is installed, the same model IDs are available in pi as `opencode-go/<model>`.
+- Use the task at hand to choose the matching model instead of defaulting to one model for everything.
+
+**OpenCode**
+- This repo includes `opencode.json` with build/plan/explore and `code-reviewer` agents pinned to the matching OpenCode Go models.
+- The default model is the balanced build model, `opencode-go/kimi-k2.5`.
+- OpenCode’s built-in `plan` agent uses `opencode-go/glm-5` for deeper reasoning, while `explore` stays on `opencode-go/minimax-m2.5`.
+- `code-reviewer` is a custom subagent for review passes on `opencode-go/minimax-m2.7`.
+
 ### Commands
 
 | Command | What it does |

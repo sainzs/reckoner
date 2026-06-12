@@ -58,56 +58,61 @@ export default function injectExtension(pi: ExtensionAPI) {
     }
 
     for (const entry of sorted) {
-      const context: InjectionBuildContext = {
-        cwd,
-        budget: { total: totalBudget, remaining },
-        recentFiles,
-        activeTask,
-        mode,
-      }
-
-      let fragment = entry.build(context)
-      if (!fragment) {
-        trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "no content" })
-        continue
-      }
-
-      if (typeof fragment === "string") {
-        fragment = {
-          key: entry.key,
-          text: fragment,
-          chars: fragment.length,
-          priority: entry.priority,
+      try {
+        const context: InjectionBuildContext = {
+          cwd,
+          budget: { total: totalBudget, remaining },
+          recentFiles,
+          activeTask,
+          mode,
         }
-      }
 
-      if (!fragment.text.trim()) {
-        trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "empty text" })
-        continue
-      }
+        let fragment = entry.build(context)
+        if (!fragment) {
+          trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "no content" })
+          continue
+        }
 
-      const maxChars = Math.min(entry.maxChars ?? remaining, remaining)
-      if (maxChars <= 0) {
-        trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "out of budget" })
-        continue
-      }
+        if (typeof fragment === "string") {
+          fragment = {
+            key: entry.key,
+            text: fragment,
+            chars: fragment.length,
+            priority: entry.priority,
+          }
+        }
 
-      const text = trimText(fragment.text, maxChars)
-      if (!text.trim()) {
-        trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "trimmed to nothing" })
-        continue
-      }
+        if (!fragment.text.trim()) {
+          trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "empty text" })
+          continue
+        }
 
-      prompt += text
-      remaining -= text.length
-      trace.fragments.push({
-        key: fragment.key,
-        chars: text.length,
-        priority: entry.priority,
-        reason: fragment.reason,
-      })
-      trace.totalChars += text.length
-      trace.remainingChars = remaining
+        const maxChars = Math.min(entry.maxChars ?? remaining, remaining)
+        if (maxChars <= 0) {
+          trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "out of budget" })
+          continue
+        }
+
+        const text = trimText(fragment.text, maxChars)
+        if (!text.trim()) {
+          trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "trimmed to nothing" })
+          continue
+        }
+
+        prompt += text
+        remaining -= text.length
+        trace.fragments.push({
+          key: fragment.key,
+          chars: text.length,
+          priority: entry.priority,
+          reason: fragment.reason,
+        })
+        trace.totalChars += text.length
+        trace.remainingChars = remaining
+      } catch (err) {
+        console.error(`[inject] Extension failed to build injection ${entry.key}:`, err)
+        trace.skipped.push({ key: entry.key, priority: entry.priority, reason: "error" })
+      }
     }
 
     lastTrace = trace

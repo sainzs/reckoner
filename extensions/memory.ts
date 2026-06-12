@@ -14,7 +14,11 @@ const PROMOTION_REPEAT_THRESHOLD = 3
 
 function memDir(cwd: string): string {
   const local = join(cwd, ".pi", "memory")
-  return existsSync(local) || existsSync(join(cwd, ".pi")) ? local : join(homedir(), ".pi", "agent", "memory")
+  if (existsSync(local)) return local
+  if (existsSync(join(cwd, ".pi"))) return local
+  const global = join(homedir(), ".pi", "agent", "memory")
+  if (existsSync(global)) return global
+  return local // default to project-local if neither exists
 }
 
 function ensureDir(dir: string) {

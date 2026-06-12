@@ -49,8 +49,7 @@ export function fingerprintLspIssue(params: { file?: string, line?: number, mess
     "nvim",
     params.client ?? "lsp",
     normalizeFilePath(params.file),
-    params.line ? `l${params.line}` : undefined,
-    shortMessageStem(params.message),
+    shortMessageStem(params.message), // Line number removed to avoid collisions when lines shift
   ])
 }
 
