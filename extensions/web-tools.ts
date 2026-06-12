@@ -4,17 +4,20 @@ import { Type } from "@sinclair/typebox"
 /**
  * Web tools: research and fetch online content.
  *
- * - web_fetch: retrieve any URL as clean markdown via Jina Reader
- * - web_search: search the web via Jina Search API (needs JINA_API_KEY)
- *   or fall back to DuckDuckGo HTML scraping
+ * - web_fetch: retrieve any URL as clean markdown via Jina Reader (free, no key needed)
+ * - web_search: search the web via Jina Search API (REQUIRES JINA_API_KEY)
+ *
+ * Without JINA_API_KEY, web_search falls back to web_fetch on known documentation
+ * sites. All public search engines (Google, DDG, Brave) now serve CAPTCHAs to bots.
+ *
+ * Get a free API key at https://jina.ai/reader (1M tokens/month free tier)
  *
  * Environment variables:
- *   JINA_API_KEY  — optional, enables Jina Search and higher rate limits on fetch
+ *   JINA_API_KEY — enables Jina Search and higher rate limits on fetch
  */
 
 const FETCH_ENDPOINT = "https://r.jina.ai"
 const SEARCH_ENDPOINT = "https://s.jina.ai"
-const DDG_ENDPOINT = "https://html.duckduckgo.com/html"
 const MAX_OUTPUT_BYTES = 40_000
 const FETCH_TIMEOUT = 30_000
 
@@ -23,7 +26,6 @@ function truncate(text: string, maxBytes: number): { content: string; truncated:
     return { content: text, truncated: false }
   }
 
-  // Truncate by lines to avoid cutting mid-character
   const lines = text.split("\n")
   let size = 0
   let kept = 0
@@ -35,9 +37,8 @@ function truncate(text: string, maxBytes: number): { content: string; truncated:
   }
 
   const content = lines.slice(0, kept).join("\n")
-  const totalLines = lines.length
   return {
-    content: `${content}\n\n[Truncated: showing ${kept} of ${totalLines} lines]`,
+    content: `${content}\n\n[Truncated: showing ${kept} of ${lines.length} lines]`,
     truncated: true,
   }
 }
@@ -46,6 +47,7 @@ async function curlFetch(
   pi: ExtensionAPI,
   url: string,
   headers: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<{ body: string; status: number }> {
   const args = ["-s", "-w", "\n%{http_code}", "--max-time", "25", "-L"]
   for (const [key, value] of Object.entries(headers)) {
@@ -53,7 +55,7 @@ async function curlFetch(
   }
   args.push(url)
 
-  const result = await pi.exec("curl", args, { timeout: FETCH_TIMEOUT })
+  const result = await pi.exec("curl", args, { timeout: FETCH_TIMEOUT, signal })
   const output = (result.stdout ?? "").trim()
   const lines = output.split("\n")
   const statusLine = lines.pop() ?? "0"
@@ -67,19 +69,19 @@ function getJinaKey(): string | undefined {
   return process.env.JINA_API_KEY
 }
 
-async function jinaFetch(pi: ExtensionAPI, url: string): Promise<string> {
+async function jinaFetch(pi: ExtensionAPI, url: string, signal?: AbortSignal): Promise<string> {
   const headers: Record<string, string> = { Accept: "text/markdown" }
   const key = getJinaKey()
   if (key) headers.Authorization = `Bearer ${key}`
 
-  const { body, status } = await curlFetch(pi, `${FETCH_ENDPOINT}/${url}`, headers)
+  const { body, status } = await curlFetch(pi, `${FETCH_ENDPOINT}/${url}`, headers, signal)
   if (status >= 400) {
     throw new Error(`Jina Reader returned HTTP ${status} for ${url}`)
   }
   return body
 }
 
-async function jinaSearch(pi: ExtensionAPI, query: string): Promise<string> {
+async function jinaSearch(pi: ExtensionAPI, query: string, signal?: AbortSignal): Promise<string> {
   const key = getJinaKey()
   if (!key) throw new Error("no_jina_key")
 
@@ -88,6 +90,7 @@ async function jinaSearch(pi: ExtensionAPI, query: string): Promise<string> {
     pi,
     `${SEARCH_ENDPOINT}/${encoded}`,
     { Accept: "text/markdown", Authorization: `Bearer ${key}` },
+    signal,
   )
   if (status >= 400) {
     throw new Error(`Jina Search returned HTTP ${status}`)
@@ -95,46 +98,14 @@ async function jinaSearch(pi: ExtensionAPI, query: string): Promise<string> {
   return body
 }
 
-async function ddgSearch(pi: ExtensionAPI, query: string): Promise<string> {
-  const encoded = encodeURIComponent(query)
-  const { body, status } = await curlFetch(pi, `${DDG_ENDPOINT}/?q=${encoded}`)
-  if (status >= 400) {
-    throw new Error(`DuckDuckGo returned HTTP ${status}`)
-  }
-
-  // Extract result links and snippets from DDG HTML
-  const results: string[] = []
-  const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi
-  const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([^<]+(?:<[^>]+>[^<]*)*)<\/a>/gi
-
-  let match
-  const links: { url: string; title: string }[] = []
-  while ((match = linkRegex.exec(body)) !== null) {
-    const url = match[1].replace(/&amp;/g, "&")
-    const title = match[2].replace(/<[^>]+>/g, "").trim()
-    if (url.startsWith("http")) {
-      links.push({ url, title })
-    }
-  }
-
-  const snippets: string[] = []
-  while ((match = snippetRegex.exec(body)) !== null) {
-    snippets.push(match[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim())
-  }
-
-  for (let i = 0; i < links.length && i < 10; i++) {
-    const snippet = snippets[i] ?? ""
-    results.push(`${i + 1}. **${links[i].title}**\n   ${links[i].url}\n   ${snippet}`)
-  }
-
-  if (results.length === 0) {
-    return "No results found."
-  }
-
-  return `Search results for: ${query}\n\n${results.join("\n\n")}`
-}
-
 export default function webToolsExtension(pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    if (ctx.hasUI) {
+      const hasKey = !!getJinaKey()
+      ctx.ui.setStatus("web", hasKey ? "web: search + fetch" : "web: fetch only")
+    }
+  })
+
   pi.registerTool({
     name: "web_fetch",
     label: "Web Fetch",
@@ -144,6 +115,7 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use web_fetch to read online documentation, wiki pages, articles, or any URL.",
       "Prefer web_fetch over bash curl for reading web content — it returns clean markdown.",
+      "Some sites behind Cloudflare may return 403. Try alternative URLs if so.",
     ],
     parameters: Type.Object({
       url: Type.String({ description: "Full URL to fetch (must start with http:// or https://)" }),
@@ -155,7 +127,7 @@ export default function webToolsExtension(pi: ExtensionAPI) {
         throw new Error(`Invalid URL: ${url} — must start with http:// or https://`)
       }
 
-      const raw = await jinaFetch(pi, url)
+      const raw = await jinaFetch(pi, url, signal)
       const { content, truncated } = truncate(raw, MAX_OUTPUT_BYTES)
 
       return {
@@ -169,11 +141,12 @@ export default function webToolsExtension(pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Uses Jina Search API if JINA_API_KEY is set, otherwise falls back to DuckDuckGo.",
+      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Requires JINA_API_KEY environment variable (free at https://jina.ai/reader). If no API key is set, falls back to suggesting direct web_fetch on known documentation sites.",
     promptSnippet: "Search the web for documentation, solutions, or any information",
     promptGuidelines: [
       "Use web_search to find documentation, solutions, APIs, or any information online.",
       "After searching, use web_fetch to read the most relevant results in full.",
+      "If web_search reports no API key, use web_fetch directly on known doc URLs instead.",
     ],
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
@@ -181,26 +154,35 @@ export default function webToolsExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal) {
       const query = params.query.trim()
-      let raw: string
-      let source: string
 
       try {
-        raw = await jinaSearch(pi, query)
-        source = "jina"
+        const raw = await jinaSearch(pi, query, signal)
+        const { content, truncated } = truncate(raw, MAX_OUTPUT_BYTES)
+        return {
+          content: [{ type: "text" as const, text: content }],
+          details: { query, source: "jina", truncated },
+        }
       } catch (err: any) {
         if (err.message === "no_jina_key") {
-          raw = await ddgSearch(pi, query)
-          source = "duckduckgo"
-        } else {
-          throw err
+          const fallbackMsg = [
+            `⚠ No JINA_API_KEY set — web search unavailable.`,
+            ``,
+            `To enable search: export JINA_API_KEY=<your-key>`,
+            `Free tier (1M tokens/month): https://jina.ai/reader`,
+            ``,
+            `Workaround: use web_fetch directly on documentation sites:`,
+            `  - MDN: https://developer.mozilla.org/en-US/search?q=${encodeURIComponent(query)}`,
+            `  - npm: https://www.npmjs.com/search?q=${encodeURIComponent(query)}`,
+            `  - GitHub: https://github.com/search?q=${encodeURIComponent(query)}&type=repositories`,
+            `  - Wikipedia: https://en.wikipedia.org/wiki/${encodeURIComponent(query.replace(/ /g, "_"))}`,
+          ].join("\n")
+
+          return {
+            content: [{ type: "text" as const, text: fallbackMsg }],
+            details: { query, source: "no_api_key", error: true },
+          }
         }
-      }
-
-      const { content, truncated } = truncate(raw, MAX_OUTPUT_BYTES)
-
-      return {
-        content: [{ type: "text" as const, text: content }],
-        details: { query, source, truncated },
+        throw err
       }
     },
   })

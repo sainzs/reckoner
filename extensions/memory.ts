@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
+import { StringEnum } from "@mariozechner/pi-ai"
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
@@ -133,13 +134,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
       "Be specific — vague notes are useless in future sessions.",
     ],
     parameters: Type.Object({
-      category: Type.Union(
-        CATEGORIES.map((c) => Type.Literal(c)),
-        {
-          description:
-            "journal=session notes, codebase=architecture/patterns, mistakes=bugs/lessons, preferences=user style, questions=open unknowns",
-        },
-      ),
+      category: StringEnum([...CATEGORIES] as const, {
+        description:
+          "journal=session notes, codebase=architecture/patterns, mistakes=bugs/lessons, preferences=user style, questions=open unknowns",
+      }),
       note: Type.String({ description: "The note to save. Be specific and concrete." }),
     }),
     async execute(_toolCallId, params) {

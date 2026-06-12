@@ -43,7 +43,7 @@ Or for local development:
 ## Extensions
 
 ### `auto-verify`
-Runs `tsc --noEmit` after any turn that edits files. Injects type errors as a steering message so the agent self-corrects. Caps at 2 cycles per run to prevent loops.
+Runs `tsc --noEmit` and related tests after any turn that edits files. Auto-detects vitest/jest from package.json. Injects type errors and test failures as a steering message so the agent self-corrects. Caps at 2 cycles per run to prevent loops.
 
 Commands: `/verify on|off|run`
 
@@ -114,7 +114,7 @@ Injects a concise behavioral philosophy before every agent run:
 
 | Variable | Purpose |
 |----------|---------|
-| `JINA_API_KEY` | Enables Jina Search and higher fetch rate limits |
+| `JINA_API_KEY` | **Required for web search.** Free at https://jina.ai/reader (1M tokens/month). Fetch works without it. |
 
 ---
 

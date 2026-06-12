@@ -1,13 +1,14 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
-import { resolve, relative } from "node:path"
+import { resolve, relative, dirname, basename } from "node:path"
 import { existsSync } from "node:fs"
 
 /**
- * Auto-verify: runs type checking after turns that edit files.
+ * Auto-verify: runs type checking and related tests after turns that edit files.
  * Catches errors immediately so the agent can self-correct.
  *
  * - Tracks files modified via edit/write tools
  * - On turn_end: runs `tsc --noEmit` if tsconfig.json exists
+ * - On turn_end: finds and runs test files near modified files
  * - Injects diagnostic errors as a steering message
  * - Limits to 2 verify cycles per agent run to prevent loops
  * - Toggle with /verify on|off
@@ -19,6 +20,7 @@ let enabled = true
 
 const MAX_VERIFY_CYCLES = 2
 const TSC_TIMEOUT = 30_000
+const TEST_TIMEOUT = 30_000
 
 function parseTscErrors(raw: string, touched: Set<string>, cwd: string): string[] {
   const lines = raw.split(/\r?\n/).filter(Boolean)
@@ -31,8 +33,6 @@ function parseTscErrors(raw: string, touched: Set<string>, cwd: string): string[
     const [, filePath, row, col, code, message] = match
     const rel = relative(cwd, resolve(cwd, filePath))
     const isTouched = touched.has(rel) || touched.has(filePath)
-
-    // Report all errors, but mark touched files
     const prefix = isTouched ? "→" : " "
     errors.push(`${prefix} ${rel}(${row},${col}): ${code} ${message}`)
   }
@@ -40,8 +40,54 @@ function parseTscErrors(raw: string, touched: Set<string>, cwd: string): string[
   return errors.slice(0, 15)
 }
 
+function findRelatedTests(filePath: string, cwd: string): string[] {
+  const tests: string[] = []
+  const dir = dirname(filePath)
+  const base = basename(filePath, ".ts").replace(/\.tsx?$/, "")
+
+  // Convention: foo.ts → foo.test.ts, foo.spec.ts
+  const candidates = [
+    resolve(cwd, dir, `${base}.test.ts`),
+    resolve(cwd, dir, `${base}.spec.ts`),
+    resolve(cwd, dir, `${base}.test.tsx`),
+    resolve(cwd, dir, `${base}.spec.tsx`),
+    // Also check __tests__ directory
+    resolve(cwd, dir, "__tests__", `${base}.test.ts`),
+    resolve(cwd, dir, "__tests__", `${base}.spec.ts`),
+  ]
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      tests.push(relative(cwd, candidate))
+    }
+  }
+
+  return tests
+}
+
+async function detectTestRunner(pi: ExtensionAPI, cwd: string): Promise<string | null> {
+  // Check package.json for test script to infer runner
+  try {
+    const result = await pi.exec("node", ["-e", `
+      const pkg = require('${resolve(cwd, "package.json")}');
+      const test = pkg.scripts?.test || '';
+      if (test.includes('vitest')) console.log('vitest');
+      else if (test.includes('jest')) console.log('jest');
+      else if (test.includes('mocha')) console.log('mocha');
+      else console.log('unknown');
+    `], { timeout: 5000 })
+    const runner = (result.stdout ?? "").trim()
+    return runner !== "unknown" ? runner : null
+  } catch {
+    return null
+  }
+}
+
 export default function autoVerifyExtension(pi: ExtensionAPI) {
+  let testRunner: string | null = null
+
   pi.on("session_start", async (_event, ctx) => {
+    testRunner = await detectTestRunner(pi, ctx.cwd)
     if (ctx.hasUI) {
       ctx.ui.setStatus("verify", enabled ? "verify on" : "verify off")
     }
@@ -68,48 +114,93 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
     if (verifyCycles >= MAX_VERIFY_CYCLES) return
 
     const cwd = ctx.cwd
-    const hasTsConfig = existsSync(resolve(cwd, "tsconfig.json"))
-    if (!hasTsConfig) return
+    const diagnostics: string[] = []
 
     if (ctx.hasUI) {
       ctx.ui.setStatus("verify", "verifying…")
     }
 
-    try {
-      const result = await pi.exec("npx", ["tsc", "--noEmit", "--pretty", "false"], {
-        timeout: TSC_TIMEOUT,
-      })
+    // --- Type checking ---
+    const hasTsConfig = existsSync(resolve(cwd, "tsconfig.json"))
+    if (hasTsConfig) {
+      try {
+        const result = await pi.exec("npx", ["tsc", "--noEmit", "--pretty", "false"], {
+          timeout: TSC_TIMEOUT,
+        })
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+        const errors = parseTscErrors(output, modifiedFiles, cwd)
+        if (errors.length > 0) {
+          diagnostics.push(`**Type errors (${errors.length}):**`, ...errors)
+        }
+      } catch {
+        // tsc failed to run — don't block the agent
+      }
+    }
 
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
-      const errors = parseTscErrors(output, modifiedFiles, cwd)
-
-      if (errors.length > 0) {
-        verifyCycles++
-        const touched = [...modifiedFiles].join(", ")
-        const summary = [
-          `⚠ Auto-verify: ${errors.length} type error(s) after editing ${touched}`,
-          "",
-          ...errors,
-          "",
-          verifyCycles >= MAX_VERIFY_CYCLES
-            ? "(max auto-verify cycles reached — fix remaining errors manually)"
-            : "Fix these errors before continuing.",
-        ].join("\n")
-
-        pi.sendMessage(
-          { customType: "auto-verify", content: summary, display: true },
-          { deliverAs: "steer", triggerTurn: true },
-        )
+    // --- Related tests ---
+    if (testRunner) {
+      const relatedTests = new Set<string>()
+      for (const file of modifiedFiles) {
+        for (const test of findRelatedTests(file, cwd)) {
+          relatedTests.add(test)
+        }
       }
 
-      if (ctx.hasUI) {
-        const label = errors.length > 0 ? `verify: ${errors.length} errors` : "verify ✓"
-        ctx.ui.setStatus("verify", label)
+      if (relatedTests.size > 0) {
+        const testFiles = [...relatedTests].slice(0, 5) // cap at 5 test files
+        try {
+          let args: string[]
+          if (testRunner === "vitest") {
+            args = ["vitest", "run", ...testFiles, "--reporter=verbose"]
+          } else if (testRunner === "jest") {
+            args = ["jest", "--no-coverage", ...testFiles]
+          } else {
+            args = [testRunner, ...testFiles]
+          }
+
+          const result = await pi.exec("npx", args, { timeout: TEST_TIMEOUT })
+          const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+
+          // Check for failures
+          if (result.code !== 0) {
+            // Extract just the failure summary, not the full output
+            const failLines = output.split(/\r?\n/).filter(
+              (l) => /FAIL|✗|✕|×|Error:|AssertionError|expected|received/i.test(l),
+            )
+            diagnostics.push(
+              `**Test failures (${testFiles.join(", ")}):**`,
+              ...failLines.slice(0, 10),
+            )
+          }
+        } catch {
+          // Tests failed to run — don't block
+        }
       }
-    } catch (err) {
-      if (ctx.hasUI) {
-        ctx.ui.setStatus("verify", "verify: tsc failed")
-      }
+    }
+
+    // --- Report ---
+    if (diagnostics.length > 0) {
+      verifyCycles++
+      const touched = [...modifiedFiles].join(", ")
+      const summary = [
+        `⚠ Auto-verify after editing ${touched}:`,
+        "",
+        ...diagnostics,
+        "",
+        verifyCycles >= MAX_VERIFY_CYCLES
+          ? "(max auto-verify cycles reached — fix remaining issues manually)"
+          : "Fix these issues before continuing.",
+      ].join("\n")
+
+      pi.sendMessage(
+        { customType: "auto-verify", content: summary, display: true },
+        { deliverAs: "steer", triggerTurn: true },
+      )
+    }
+
+    if (ctx.hasUI) {
+      const label = diagnostics.length > 0 ? `verify: issues found` : "verify ✓"
+      ctx.ui.setStatus("verify", label)
     }
   })
 
@@ -126,13 +217,14 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Auto-verify enabled", "info")
       } else if (mode === "run" || mode === "now") {
         verifyCycles = 0
-        modifiedFiles.add("*")
+        // Mark all tracked files for re-verification
         ctx.ui.notify("Running verification…", "info")
       } else {
+        const runner = testRunner ?? "none detected"
         const state = enabled ? "enabled" : "disabled"
         const cycles = `${verifyCycles}/${MAX_VERIFY_CYCLES} cycles used`
         const files = modifiedFiles.size > 0 ? `tracking ${modifiedFiles.size} files` : "no files tracked"
-        ctx.ui.notify(`Auto-verify: ${state}, ${cycles}, ${files}`, "info")
+        ctx.ui.notify(`Auto-verify: ${state}, ${cycles}, ${files}, test runner: ${runner}`, "info")
       }
 
       if (ctx.hasUI) {

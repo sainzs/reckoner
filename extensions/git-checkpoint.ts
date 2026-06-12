@@ -47,13 +47,19 @@ async function createCheckpoint(pi: ExtensionAPI, description: string): Promise<
   if (!dirty) return undefined
 
   try {
-    // git stash create: makes a stash commit without affecting the working tree or stash list
+    // Stage everything including untracked files, create stash commit, then unstage
+    // git stash create only captures staged + tracked modified, so we stage first
+    await run(pi, "git", ["add", "-A"])
     const hash = await run(pi, "git", ["stash", "create", description])
+    await run(pi, "git", ["reset"]) // unstage without changing working tree
+
     if (!hash || hash.length < 7) return undefined
 
     checkpoints.push({ hash, timestamp: Date.now(), description })
     return hash
   } catch {
+    // Make sure we unstage even on failure
+    try { await run(pi, "git", ["reset"]) } catch {}
     return undefined
   }
 }
@@ -112,9 +118,10 @@ export default function gitCheckpointExtension(pi: ExtensionAPI) {
       if (!ok) return
 
       try {
-        // Reset working tree to clean state
+        // Reset working tree: checkout tracked files, remove untracked,
+        // then apply the checkpoint which includes everything
         await run(pi, "git", ["checkout", "--", "."])
-        await run(pi, "git", ["clean", "-fd"])
+        await run(pi, "git", ["clean", "-fd"]) // safe: checkpoint captured untracked files
         // Apply the checkpoint
         await run(pi, "git", ["stash", "apply", last.hash])
         checkpoints.pop()
