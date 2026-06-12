@@ -1,5 +1,54 @@
 import type { InjectionBuildContext, LessonMatch, LessonRecord, MemoryCategory } from "./lesson-types.js"
-import { fingerprintLesson, normalizeFilePath } from "./fingerprint.js"
+
+export function normalizeFilePath(file?: string): string {
+  if (!file) return "unknown"
+  return String(file)
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_./:-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .replace(/^\.\//, "") || "unknown"
+}
+
+function normalizeDiagnosticMessage(message: string): string {
+  return message
+    .toLowerCase()
+    .replace(/\b\d+\b/g, "#")
+    .replace(/['"`][^'"`]+['"`]/g, '"value"')
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function shortMessageStem(message: string, max = 80): string {
+  const normalized = normalizeDiagnosticMessage(message)
+  return normalized.length <= max ? normalized : normalized.slice(0, max)
+}
+
+function buildFingerprint(parts: Array<string | undefined>): string {
+  return parts
+    .map(normalizeFilePath)
+    .filter(Boolean)
+    .join("|")
+}
+
+export function fingerprintLesson(record: {
+  fingerprint?: string
+  files?: string[]
+  summary: string
+  kind?: string
+  source?: string
+}): string {
+  if (record.fingerprint) return normalizeFilePath(record.fingerprint)
+  return buildFingerprint([
+    record.source ?? "lesson",
+    record.kind ?? "unknown",
+    record.files?.[0],
+    shortMessageStem(record.summary),
+  ])
+}
 
 const DETAIL_FIELDS = new Set(["summary", "trigger", "symptom", "rootCause", "prevention", "outcome"])
 const CONFIDENCE_SCORES = { low: 1, medium: 3, high: 5 } as const

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { MEMORY_CATEGORIES, type InjectionBuildContext, type LessonMatch, type LessonRecord, type MemoryCategory, type MemorySelectionPayload, type MemorySummary, type PromotionCandidate } from "./lib/lesson-types.js"
-import { fingerprintLesson } from "./lib/fingerprint.js"
+import { fingerprintLesson } from "./lib/memory-format.js"
 import { parseLessonFile, scoreLessonRecord, serializeLessonRecord, summarizeLesson } from "./lib/memory-format.js"
 
 const CATEGORIES = MEMORY_CATEGORIES

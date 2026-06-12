@@ -14,7 +14,6 @@ const context: InjectionBuildContext = {
     nextStep: "Refine memory scoring",
     remainingSteps: ["Refine memory scoring", "Verify injection output"],
   },
-  mode: "build",
 }
 
 const relevantRecord: LessonRecord = {

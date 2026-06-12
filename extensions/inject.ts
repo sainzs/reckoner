@@ -18,8 +18,7 @@ export default function injectExtension(pi: ExtensionAPI) {
   const registry = new Map<string, InjectionEntry>()
   let cwd = ""
   let recentFiles: string[] = []
-  let activeTask: TaskState | undefined
-  let mode: "build" | "plan" | undefined
+  let activeTask: any | undefined
   let lastTrace: InjectionTrace | null = null
   const totalBudget = 5000
 
@@ -31,14 +30,8 @@ export default function injectExtension(pi: ExtensionAPI) {
     recentFiles = Array.isArray(result?.touchedFiles) ? result.touchedFiles : []
   })
 
-  pi.events.on("reckoner:task-updated", (task: TaskState | null) => {
+  pi.events.on("reckoner:task-updated", (task: any | null) => {
     activeTask = task ?? undefined
-  })
-
-  pi.events.on("reckoner:mode-changed", (nextMode: any) => {
-    if (nextMode?.mode === "plan" || nextMode?.mode === "build") {
-      mode = nextMode.mode
-    }
   })
 
   pi.on("session_start", async (_event: any, ctx: any) => {
@@ -64,7 +57,6 @@ export default function injectExtension(pi: ExtensionAPI) {
           budget: { total: totalBudget, remaining },
           recentFiles,
           activeTask,
-          mode,
         }
 
         let fragment = entry.build(context)

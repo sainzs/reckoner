@@ -133,8 +133,7 @@ export interface InjectionBuildContext {
     remaining: number
   }
   recentFiles: string[]
-  activeTask?: TaskState
-  mode?: "build" | "plan"
+  activeTask?: any
 }
 
 export interface InjectionFragment {
