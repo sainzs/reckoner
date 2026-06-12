@@ -1,23 +1,29 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import { Type } from "@sinclair/typebox"
 import { StringEnum } from "@mariozechner/pi-ai"
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { homedir } from "node:os"
 
 /**
  * Memory: persistent journal across sessions.
  *
- * Stores notes as markdown files in .pi/memory/ (project) or
- * ~/.pi/agent/memory/ (global). Injects recent memories before
- * each agent run so the agent carries context forward.
+ * Two-layer architecture (see genesis.md):
+ *   Storage  — append-only markdown files on disk. Write liberally.
+ *   Injection — curated subset in system prompt. Inject surgically.
+ *
+ * Listens for `reckoner:lesson` events from auto-verify and writes
+ * terse entries to mistakes.md automatically. The loop closes here.
  *
  * Categories:
  *   journal    — chronological session notes
  *   codebase   — architecture, patterns, decisions
- *   mistakes   — bugs, wrong assumptions, lessons learned
+ *   mistakes   — bugs, wrong assumptions, lessons learned (auto + manual)
  *   preferences — user style, naming, conventions
  *   questions  — open unknowns to revisit
+ *
+ * Injection priority (highest first):
+ *   mistakes > codebase > preferences > questions > journal
  *
  * Tools:
  *   remember(category, note) — write a note
@@ -62,7 +68,7 @@ function searchNotes(dir: string, query: string): string[] {
     const content = readFile(memFile(dir, cat))
     if (!content) continue
 
-    const blocks = content.split(/^## /m).filter(Boolean)
+    const blocks = content.split(/^## /m).filter(b => b.trim())
     for (const block of blocks) {
       if (block.toLowerCase().includes(q)) {
         results.push(`[${cat}]\n## ${block.trim()}`)
@@ -73,26 +79,56 @@ function searchNotes(dir: string, query: string): string[] {
   return results
 }
 
+/** Extract the last N entries from a category file */
+function lastEntries(dir: string, category: Category, n: number): string[] {
+  const content = readFile(memFile(dir, category))
+  if (!content) return []
+  return content.split(/^## /m).filter(b => b.trim()).slice(-n).map(e => `## ${e.trim()}`)
+}
+
 function buildInjection(dir: string): string {
   if (!existsSync(dir)) return ""
 
   const parts: string[] = []
+  let budget = MAX_INJECT_CHARS
 
-  // Always include last few journal entries
-  const journal = readFile(memFile(dir, "journal"))
-  if (journal) {
-    const entries = journal.split(/^## /m).filter(Boolean)
-    const recent = entries.slice(-4).map((e) => `## ${e.trim()}`)
-    if (recent.length > 0) {
-      parts.push(`### Recent journal\n${recent.join("\n\n")}`)
-    }
+  // Priority 1: Mistakes — most valuable for the loop (last 10)
+  const mistakes = lastEntries(dir, "mistakes", 10)
+  if (mistakes.length > 0) {
+    const section = `### Lessons from past sessions\n${mistakes.join("\n\n")}`
+    parts.push(section)
+    budget -= section.length
   }
 
-  // Include non-journal categories if they exist and have content
-  for (const cat of CATEGORIES.filter((c) => c !== "journal")) {
-    const content = readFile(memFile(dir, cat))
-    if (content && content.trim().length > 50) {
-      parts.push(`### ${cat}\n${content.trim()}`)
+  // Priority 2: Codebase — architectural decisions
+  const codebase = readFile(memFile(dir, "codebase"))
+  if (codebase && codebase.trim().length > 50 && budget > 500) {
+    const section = `### Codebase\n${codebase.trim()}`
+    parts.push(section)
+    budget -= section.length
+  }
+
+  // Priority 3: Preferences — user style
+  const prefs = readFile(memFile(dir, "preferences"))
+  if (prefs && prefs.trim().length > 20 && budget > 300) {
+    const section = `### Preferences\n${prefs.trim()}`
+    parts.push(section)
+    budget -= section.length
+  }
+
+  // Priority 4: Questions — open unknowns
+  const questions = readFile(memFile(dir, "questions"))
+  if (questions && questions.trim().length > 20 && budget > 300) {
+    const section = `### Open questions\n${questions.trim()}`
+    parts.push(section)
+    budget -= section.length
+  }
+
+  // Priority 5: Journal — last 2 entries (context, not the point)
+  if (budget > 400) {
+    const journal = lastEntries(dir, "journal", 2)
+    if (journal.length > 0) {
+      parts.push(`### Recent journal\n${journal.join("\n\n")}`)
     }
   }
 
@@ -100,9 +136,10 @@ function buildInjection(dir: string): string {
 
   const full = `\n\n---\n## Reckoner memory\n\n${parts.join("\n\n")}\n---`
 
-  // Trim to budget
+  // Hard trim — should rarely hit this given budget tracking above
   if (full.length <= MAX_INJECT_CHARS) return full
-  return full.slice(0, MAX_INJECT_CHARS) + "\n\n[memory truncated]\n---"
+  const TRUNCATION_SUFFIX = "\n\n[memory truncated]\n---"
+  return full.slice(0, MAX_INJECT_CHARS - TRUNCATION_SUFFIX.length) + TRUNCATION_SUFFIX
 }
 
 export default function memoryExtension(pi: ExtensionAPI) {
@@ -113,6 +150,19 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (ctx.hasUI) {
       ctx.ui.setStatus("memory", existsSync(dir) ? "memory on" : "memory ready")
     }
+  })
+
+  // Listen for lessons from auto-verify — the loop closes here
+  pi.events.on("reckoner:lesson", (data: any) => {
+    if (!dir) return
+    const { errorKind, files, summary, fixed } = data
+    const outcome = fixed ? "fixed" : "unresolved"
+    const note = `[auto-verify] ${errorKind} error in ${files} — ${summary} (${outcome})`
+
+    const recentMistakes = lastEntries(dir, "mistakes", 5)
+    if (recentMistakes.some((entry) => entry.includes(note))) return
+
+    appendNote(dir, "mistakes", note)
   })
 
   pi.on("before_agent_start", async (event, _ctx) => {

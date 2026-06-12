@@ -11,12 +11,15 @@ import { existsSync } from "node:fs"
  * - On turn_end: finds and runs test files near modified files
  * - Injects diagnostic errors as a steering message
  * - Limits to 2 verify cycles per agent run to prevent loops
+ * - Emits `reckoner:lesson` via pi.events when errors are caught
  * - Toggle with /verify on|off
  */
 
 let modifiedFiles = new Set<string>()
 let verifyCycles = 0
 let enabled = true
+let caughtErrors: { files: string[], errors: string[], type: "type" | "test" }[] = []
+let resolvedCaughtErrors = false
 
 const MAX_VERIFY_CYCLES = 2
 const TSC_TIMEOUT = 30_000
@@ -96,6 +99,8 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
   pi.on("agent_start", async () => {
     modifiedFiles.clear()
     verifyCycles = 0
+    caughtErrors = []
+    resolvedCaughtErrors = false
   })
 
   pi.on("tool_result", async (event) => {
@@ -115,6 +120,8 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
 
     const cwd = ctx.cwd
     const diagnostics: string[] = []
+    const typeErrors: string[] = []
+    const testFailures: string[] = []
 
     if (ctx.hasUI) {
       ctx.ui.setStatus("verify", "verifying…")
@@ -130,6 +137,7 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
         const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
         const errors = parseTscErrors(output, modifiedFiles, cwd)
         if (errors.length > 0) {
+          typeErrors.push(...errors)
           diagnostics.push(`**Type errors (${errors.length}):**`, ...errors)
         }
       } catch {
@@ -167,9 +175,10 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
             const failLines = output.split(/\r?\n/).filter(
               (l) => /FAIL|✗|✕|×|Error:|AssertionError|expected|received/i.test(l),
             )
+            testFailures.push(...failLines.slice(0, 10))
             diagnostics.push(
               `**Test failures (${testFiles.join(", ")}):**`,
-              ...failLines.slice(0, 10),
+              ...testFailures,
             )
           }
         } catch {
@@ -178,10 +187,19 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
       }
     }
 
-    // --- Report ---
+    // --- Record what was caught ---
     if (diagnostics.length > 0) {
+      const touchedFiles = [...modifiedFiles]
+      if (typeErrors.length > 0) {
+        caughtErrors.push({ files: touchedFiles, errors: typeErrors.slice(0, 3), type: "type" })
+      }
+      if (testFailures.length > 0) {
+        caughtErrors.push({ files: touchedFiles, errors: testFailures.slice(0, 3), type: "test" })
+      }
+
+      resolvedCaughtErrors = false
       verifyCycles++
-      const touched = [...modifiedFiles].join(", ")
+      const touched = touchedFiles.join(", ")
       const summary = [
         `⚠ Auto-verify after editing ${touched}:`,
         "",
@@ -198,9 +216,40 @@ export default function autoVerifyExtension(pi: ExtensionAPI) {
       )
     }
 
+    if (diagnostics.length === 0 && caughtErrors.length > 0) {
+      resolvedCaughtErrors = true
+    }
+
     if (ctx.hasUI) {
       const label = diagnostics.length > 0 ? `verify: issues found` : "verify ✓"
       ctx.ui.setStatus("verify", label)
+    }
+  })
+
+  pi.on("agent_end", async () => {
+    if (caughtErrors.length === 0) return
+
+    // Deduplicate error messages
+    const seen = new Set<string>()
+    const unique = caughtErrors.filter(e => {
+      const key = e.errors.join("|")
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    // Emit terse lessons — one per error group
+    for (const err of unique) {
+      const files = err.files.slice(0, 3).join(", ")
+      const summary = err.errors.map(e => e.trim()).join("; ").slice(0, 200)
+      pi.events.emit("reckoner:lesson", {
+        type: "auto-verify",
+        errorKind: err.type,
+        files,
+        summary,
+        fixed: resolvedCaughtErrors,
+        timestamp: Date.now(),
+      })
     }
   })
 
