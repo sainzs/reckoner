@@ -2,6 +2,8 @@
 
 > A cockpit for the pilot, not a dashboard for the audience.
 
+For the canonical project orientation and policy, see [`docs/orientation-policy.md`](docs/orientation-policy.md).
+
 ## What this is
 
 Reckoner is a terminal agent that forgets everything between sessions. Its extensions

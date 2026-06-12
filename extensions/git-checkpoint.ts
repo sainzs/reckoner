@@ -112,17 +112,16 @@ export default function gitCheckpointExtension(pi: ExtensionAPI) {
       const last = checkpoints[checkpoints.length - 1]
       const ok = await ctx.ui.confirm(
         "Restore checkpoint?",
-        `This will discard all current changes and restore to:\n\n${last.description} (${formatTime(last.timestamp)})\n\nHash: ${last.hash.slice(0, 8)}`,
+        `This will discard tracked-file changes and restore to:\n\n${last.description} (${formatTime(last.timestamp)})\n\nHash: ${last.hash.slice(0, 8)}\n\nUntracked files are preserved; if they conflict, restore may fail rather than deleting them.`,
       )
 
       if (!ok) return
 
       try {
-        // Reset working tree: checkout tracked files, remove untracked,
-        // then apply the checkpoint which includes everything
+        // Reset tracked files only, preserving untracked files. If an
+        // untracked file conflicts with the checkpoint, fail instead of
+        // deleting user data with git clean.
         await run(pi, "git", ["checkout", "--", "."])
-        await run(pi, "git", ["clean", "-fd"]) // safe: checkpoint captured untracked files
-        // Apply the checkpoint
         await run(pi, "git", ["stash", "apply", last.hash])
         checkpoints.pop()
         ctx.ui.notify(

@@ -8,20 +8,24 @@ const BLOCKED_PATH_PATTERNS = [
   /(?:^|[\\/])\.aws(?:[\\/]|$)/i,
   /(?:^|[\\/])\.gnupg(?:[\\/]|$)/i,
   /(?:^|[\\/])\.pi[\\/]+agent[\\/]+auth\.json$/i,
+  /(?:^|[\\/])\.pi[\\/]+agent[\\/]+models\.json$/i,
   /(?:^|[\\/])(secrets?|credentials?)\.(json|ya?ml|toml|ini|env)$/i,
   /(?:^|[\\/])(id_rsa|id_ed25519|known_hosts)$/i,
   /\.(pem|key|p12|pfx)$/i,
 ]
 
 const DANGEROUS_BASH_PATTERNS = [
-  /\brm\s+-rf\b/i,
+  /\brm\s+-[a-z]*r[a-z]*f\b/i,
+  /\brm\s+-[a-z]*f[a-z]*r\b/i,
+  /\bfind\b.*\s-delete\b/i,
   /\bsudo\b/i,
   /\bdd\s+if=/i,
   /\bmkfs\./i,
   /\bchmod\s+777\b/i,
   /\bgit\s+push\b.*--force/i,
   /\bgit\s+reset\b.*--hard/i,
-  /\bgit\s+clean\b.*-fdx/i,
+  /\bgit\s+checkout\b.*\s-f\b/i,
+  /\bgit\s+clean\b.*-f/i,
   /\bcurl\b.*\|\s*(sh|bash)\b/i,
   /\bwget\b.*\|\s*(sh|bash)\b/i,
 ]

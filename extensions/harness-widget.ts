@@ -22,6 +22,7 @@ function summarizeVerifyRisk(result: VerifyResult): WidgetState["topRisk"] | und
 
 export default function harnessWidgetExtension(pi: ExtensionAPI) {
   let enabled = true
+  let active = true
   const state: WidgetState = {}
 
   function renderLines(): string[] {
@@ -36,27 +37,42 @@ export default function harnessWidgetExtension(pi: ExtensionAPI) {
     return lines.slice(0, 3)
   }
 
-  function refresh(ctx: any) {
-    if (!ctx.hasUI || !enabled) return
-    const lines = renderLines()
-    if (lines.length === 0) {
-      ctx.ui.setWidget("harness", undefined)
-      return
+  function clearWidget(ctx: any) {
+    try {
+      if (ctx.hasUI) ctx.ui.setWidget("harness", undefined)
+    } catch {
+      // The session may already be replacing/reloading; stale contexts are safe to ignore.
     }
+  }
 
-    ctx.ui.setWidget("harness", (_tui: any, theme: any) => ({
-      render: (width: number) => lines.map((line) => {
-        const colonIdx = line.indexOf(":")
-        const label = colonIdx >= 0 ? line.slice(0, colonIdx + 1) : line
-        const value = colonIdx >= 0 ? line.slice(colonIdx + 1) : ""
-        if (line.startsWith("risk:") && state.topRisk?.severity) {
-          const color = state.topRisk.severity === "error" ? "error" : state.topRisk.severity === "warn" ? "warning" : "accent"
-          return truncateToWidth(theme.fg("dim", label) + theme.fg(color, value.trimStart()), width)
-        }
-        return truncateToWidth(theme.fg("dim", label) + value, width)
-      }),
-      invalidate: () => {},
-    }))
+  function refresh(ctx: any) {
+    if (!active || !enabled) return
+
+    try {
+      if (!ctx.hasUI) return
+      const lines = renderLines()
+      if (lines.length === 0) {
+        ctx.ui.setWidget("harness", undefined)
+        return
+      }
+
+      ctx.ui.setWidget("harness", (_tui: any, theme: any) => ({
+        render: (width: number) => lines.map((line) => {
+          const colonIdx = line.indexOf(":")
+          const label = colonIdx >= 0 ? line.slice(0, colonIdx + 1) : line
+          const value = colonIdx >= 0 ? line.slice(colonIdx + 1) : ""
+          if (line.startsWith("risk:") && state.topRisk?.severity) {
+            const color = state.topRisk.severity === "error" ? "error" : state.topRisk.severity === "warn" ? "warning" : "accent"
+            return truncateToWidth(theme.fg("dim", label) + theme.fg(color, value.trimStart()), width)
+          }
+          return truncateToWidth(theme.fg("dim", label) + value, width)
+        }),
+        invalidate: () => {},
+      }))
+    } catch {
+      // Ignore stale extension contexts after /reload, /new, /resume, /fork, or /clone.
+      active = false
+    }
   }
 
   pi.events.on("reckoner:task-updated", (task: TaskState | null) => {
@@ -79,7 +95,13 @@ export default function harnessWidgetExtension(pi: ExtensionAPI) {
   })
 
   pi.on("session_start", async (_event: any, ctx: any) => {
+    active = true
     refresh(ctx)
+  })
+
+  pi.on("session_shutdown", async (_event: any, ctx: any) => {
+    active = false
+    clearWidget(ctx)
   })
 
   pi.on("agent_end", async (_event: any, ctx: any) => {
@@ -99,13 +121,13 @@ export default function harnessWidgetExtension(pi: ExtensionAPI) {
       else enabled = !enabled
 
       if (!enabled) {
-        ctx.ui.setWidget("harness", undefined)
-        ctx.ui.notify("Harness widget disabled", "info")
+        clearWidget(ctx)
+        if (ctx.hasUI) ctx.ui.notify("Harness widget disabled", "info")
         return
       }
 
       refresh(ctx)
-      ctx.ui.notify("Harness widget enabled", "info")
+      if (ctx.hasUI) ctx.ui.notify("Harness widget enabled", "info")
     },
   })
 }

@@ -69,6 +69,33 @@ function getJinaKey(): string | undefined {
   return process.env.JINA_API_KEY
 }
 
+function isBlockedHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  if (host === "localhost" || host.endsWith(".localhost")) return true
+  if (host === "::1" || host === "[::1]") return true
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!ipv4) return false
+
+  const [a, b] = ipv4.slice(1).map(Number)
+  if (a === 10 || a === 127 || a === 0) return true
+  if (a === 169 && b === 254) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  return false
+}
+
+function validatePublicHttpUrl(rawUrl: string): URL {
+  const parsed = new URL(rawUrl)
+  if (parsed.protocol !== "https:") {
+    throw new Error(`Invalid URL: ${rawUrl} — only https:// URLs are allowed`)
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    throw new Error(`Blocked URL host: ${parsed.hostname}`)
+  }
+  return parsed
+}
+
 async function jinaFetch(pi: ExtensionAPI, url: string, signal?: AbortSignal): Promise<string> {
   const headers: Record<string, string> = { Accept: "text/markdown" }
   const key = getJinaKey()
@@ -119,9 +146,7 @@ export default function webToolsExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal) {
       const url = params.url.trim()
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        throw new Error(`Invalid URL: ${url} — must start with http:// or https://`)
-      }
+      validatePublicHttpUrl(url)
 
       const raw = await jinaFetch(pi, url, signal)
       const { content, truncated } = truncate(raw, MAX_OUTPUT_BYTES)

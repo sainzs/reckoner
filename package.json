@@ -1,8 +1,8 @@
 {
   "name": "reckoner",
   "version": "0.1.0",
-  "description": "The coding agent that learns from its mistakes.",
-  "keywords": ["pi-package", "coding-agent", "pi"],
+  "description": "Agent Workbench memory and policy package for persistent learning loops.",
+  "keywords": ["pi-package", "coding-agent", "pi", "agent-workbench", "memory", "policy"],
   "author": "sainzs",
   "license": "MIT",
   "scripts": {

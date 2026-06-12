@@ -2,7 +2,7 @@
 
 > *"Because we separate like ripples on a blank shore."*
 
-The coding agent that learns from its mistakes.
+The memory and policy package for Agent Workbench.
 
 ---
 
@@ -14,7 +14,8 @@ five minutes, then gone.
 
 ## The thesis
 
-Reckoner is a [pi](https://github.com/mariozechner/pi-coding-agent) package that
+Reckoner is a [pi](https://github.com/mariozechner/pi-coding-agent) package inside
+the `agent-workbench` monorepo that
 closes the feedback loop. When the agent makes an error, it catches it, fixes it,
 and records the pattern. Next session, that lesson is in its context. The agent
 compounds its competence over time instead of resetting to zero.
@@ -59,13 +60,16 @@ The loop is the thesis. These are the organs that support it:
 | **Guardrails** | Blocks writes to `.env`, `~/.ssh`, and key files. Dangerous commands require confirmation. |
 | **Principles** | Behavioral guidelines injected every session. Read before acting, smallest safe change, verify before done. |
 
-## Install
+## Workbench integration
 
 ```bash
-pi install git:github.com/sainzs/reckoner
+cd /Users/sainzs/Code/open-source-work/my-projects/agent-workbench/packages/reckoner
+npm install
+npm run verify:self
 ```
 
-That's it. Pi clones the repo, runs `npm install`, and loads everything.
+Reckoner is package-local in the unified workbench. Use this package path when wiring
+or testing `pi` package behavior from the monorepo.
 
 ### Requirements
 
@@ -76,22 +80,19 @@ That's it. Pi clones the repo, runs `npm install`, and loads everything.
 | `fd` | file discovery |
 | `JINA_API_KEY` | web search - [free tier](https://jina.ai/reader) |
 
-### Try before installing
+### Run with pi from this package
 
 ```bash
-pi -e git:github.com/sainzs/reckoner
+pi -e .
 ```
 
-Installs to a temp directory for that run only.
+Runs the package in-place for that session.
 
-### Develop locally
+### Workbench root context
 
 ```bash
-git clone https://github.com/sainzs/reckoner
-cd reckoner
-npm install
-npm run verify:self   # typecheck + tests
-pi install ./reckoner  # or add to ~/.pi/agent/settings.json
+cd /Users/sainzs/Code/open-source-work/my-projects/agent-workbench
+# Reckoner lives at packages/reckoner
 ```
 
 ## Usage
@@ -112,25 +113,7 @@ Reckoner loads automatically.
 
 ### Model routing
 
-Reckoner now ships a shared task→model policy in `prompts/model-routing.md` and a matching `model-routing` skill.
-
-| Task | Recommended model |
-|---|---|
-| Plan / architecture / hard debugging | `opencode-go/glm-5` |
-| Build / implementation / tests | `opencode-go/kimi-k2.5` |
-| Explore / search / lookup | `opencode-go/minimax-m2.5` |
-| Review / second pass / verification | `opencode-go/minimax-m2.7` |
-
-**pi**
-- The skill is a guide, not an automatic switcher.
-- Once the OpenCode Go provider is installed, the same model IDs are available in pi as `opencode-go/<model>`.
-- Use the task at hand to choose the matching model instead of defaulting to one model for everything.
-
-**OpenCode**
-- This repo includes `opencode.json` with build/plan/explore and `code-reviewer` agents pinned to the matching OpenCode Go models.
-- The default model is the balanced build model, `opencode-go/kimi-k2.5`.
-- OpenCode's built-in `plan` agent uses `opencode-go/glm-5` for deeper reasoning, while `explore` stays on `opencode-go/minimax-m2.5`.
-- `code-reviewer` is a custom subagent for review passes on `opencode-go/minimax-m2.7`.
+The canonical task→model policy lives in [`docs/orientation-policy.md`](docs/orientation-policy.md) and [`prompts/model-routing.md`](prompts/model-routing.md). The matching skill is a thin wrapper around that shared policy, and `opencode.json` pins the same mappings for OpenCode agents.
 
 ### Commands
 

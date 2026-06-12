@@ -29,6 +29,7 @@ interface FooterState {
 
 export default function harnessFooterExtension(pi: ExtensionAPI) {
   let enabled = true
+  let active = true
   const state: FooterState = {}
 
   function updateUsage(ctx: any) {
@@ -44,63 +45,78 @@ export default function harnessFooterExtension(pi: ExtensionAPI) {
     state.usage = { cost }
   }
 
+  function clearFooter(ctx: any) {
+    try {
+      if (ctx.hasUI) ctx.ui.setFooter(undefined)
+    } catch {
+      // The session may already be replacing/reloading; stale contexts are safe to ignore.
+    }
+  }
+
   function refresh(ctx: any) {
-    if (!ctx.hasUI || !enabled) return
-    ctx.ui.setFooter((tui: any, theme: any, footerData: any) => {
-      const unsub = footerData.onBranchChange(() => tui.requestRender())
-      return {
-        dispose: unsub,
-        invalidate() {},
-        render(width: number): string[] {
-          const parts: string[] = []
-          const sep = theme.fg("dim", "  ·  ")
+    if (!active || !enabled) return
 
-          // Branch — always show
-          const branch = state.workspace?.branch || footerData.getGitBranch()
-          if (branch) {
-            const dirty = state.workspace?.dirtyCount ?? 0
-            const label = dirty > 0 ? `${branch} · ${dirty} changes` : branch
-            parts.push(theme.fg("dim", label))
-          }
+    try {
+      if (!ctx.hasUI) return
+      ctx.ui.setFooter((tui: any, theme: any, footerData: any) => {
+        const unsub = footerData.onBranchChange(() => tui.requestRender())
+        return {
+          dispose: unsub,
+          invalidate() {},
+          render(width: number): string[] {
+            const parts: string[] = []
+            const sep = theme.fg("dim", "  ·  ")
 
-          // Mode — only when plan (build is silent default)
-          if (state.mode?.mode === "plan") {
-            parts.push(theme.fg("accent", "plan mode"))
-          }
+            // Branch — always show
+            const branch = state.workspace?.branch || footerData.getGitBranch()
+            if (branch) {
+              const dirty = state.workspace?.dirtyCount ?? 0
+              const label = dirty > 0 ? `${branch} · ${dirty} changes` : branch
+              parts.push(theme.fg("dim", label))
+            }
 
-          // Verify — only when there are new issues
-          if (state.verify && state.verify.introducedCount > 0) {
-            const n = state.verify.introducedCount
-            const r = state.verify.resolvedCount
-            const fixed = r > 0 ? `, ${r} fixed` : ""
-            parts.push(theme.fg("warning", `${n} new issue${n === 1 ? "" : "s"}${fixed}`))
-          } else if (state.verify?.level === "off") {
-            parts.push(theme.fg("dim", "verify off"))
-          }
+            // Mode — only when plan (build is silent default)
+            if (state.mode?.mode === "plan") {
+              parts.push(theme.fg("accent", "plan mode"))
+            }
 
-          // Code intel — only when NOT working
-          if (state.nvim && !state.nvim.ready) {
-            const label = state.nvim.label.replace(/^NVIM\s*/i, "").toLowerCase()
-            parts.push(theme.fg("warning", `code intel ${label}`))
-          }
+            // Verify — only when there are new issues
+            if (state.verify && state.verify.introducedCount > 0) {
+              const n = state.verify.introducedCount
+              const r = state.verify.resolvedCount
+              const fixed = r > 0 ? `, ${r} fixed` : ""
+              parts.push(theme.fg("warning", `${n} new issue${n === 1 ? "" : "s"}${fixed}`))
+            } else if (state.verify?.level === "off") {
+              parts.push(theme.fg("dim", "verify off"))
+            }
 
-          // Task — only when active and incomplete
-          if (state.task && state.task.done < state.task.total) {
-            const remaining = state.task.total - state.task.done
-            const label = remaining === 1 ? "1 step left" : `${remaining} steps left`
-            parts.push(theme.fg("dim", label))
-          }
+            // Code intel — only when NOT working
+            if (state.nvim && !state.nvim.ready) {
+              const label = state.nvim.label.replace(/^NVIM\s*/i, "").toLowerCase()
+              parts.push(theme.fg("warning", `code intel ${label}`))
+            }
 
-          // Cost — only when non-zero
-          if (state.usage && state.usage.cost > 0) {
-            parts.push(theme.fg("dim", `$${state.usage.cost.toFixed(2)}`))
-          }
+            // Task — only when active and incomplete
+            if (state.task && state.task.done < state.task.total) {
+              const remaining = state.task.total - state.task.done
+              const label = remaining === 1 ? "1 step left" : `${remaining} steps left`
+              parts.push(theme.fg("dim", label))
+            }
 
-          if (parts.length === 0) return [""]
-          return [truncateToWidth(parts.join(sep), width)]
-        },
-      }
-    })
+            // Cost — only when non-zero
+            if (state.usage && state.usage.cost > 0) {
+              parts.push(theme.fg("dim", `$${state.usage.cost.toFixed(2)}`))
+            }
+
+            if (parts.length === 0) return [""]
+            return [truncateToWidth(parts.join(sep), width)]
+          },
+        }
+      })
+    } catch {
+      // Ignore stale extension contexts after /reload, /new, /resume, /fork, or /clone.
+      active = false
+    }
   }
 
   pi.events.on("reckoner:workspace-updated", (workspace: WorkspaceState) => {
@@ -139,12 +155,17 @@ export default function harnessFooterExtension(pi: ExtensionAPI) {
   })
 
   pi.on("session_start", async (_event: any, ctx: any) => {
+    active = true
     updateUsage(ctx)
     refresh(ctx)
   })
 
+  pi.on("session_shutdown", async (_event: any, ctx: any) => {
+    active = false
+    clearFooter(ctx)
+  })
+
   pi.on("turn_end", async (_event: any, ctx: any) => {
-    updateUsage(ctx)
     refresh(ctx)
   })
 
@@ -156,12 +177,12 @@ export default function harnessFooterExtension(pi: ExtensionAPI) {
       else if (mode === "on") enabled = true
       else enabled = !enabled
 
-      if (enabled) {
-        refresh(ctx)
-        ctx.ui.notify("Custom footer enabled", "info")
+      if (!enabled) {
+        clearFooter(ctx)
+        if (ctx.hasUI) ctx.ui.notify("Default footer restored", "info")
       } else {
-        ctx.ui.setFooter(undefined)
-        ctx.ui.notify("Default footer restored", "info")
+        refresh(ctx)
+        if (ctx.hasUI) ctx.ui.notify("Custom footer enabled", "info")
       }
     },
   })
