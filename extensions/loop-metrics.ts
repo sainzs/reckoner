@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { InjectionTrace, LessonRecord, MemorySelectionPayload, PromotionCandidate, VerifyResult } from "./lib/lesson-types.js"
 
@@ -31,8 +31,7 @@ function readEvents(path: string): MetricEvent[] {
 
 function appendEvent(path: string, event: MetricEvent) {
   ensureDir(path)
-  const prefix = existsSync(path) ? readFileSync(path, "utf8") : ""
-  writeFileSync(path, `${prefix}${JSON.stringify(event)}\n`, "utf8")
+  appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8")
 }
 
 function metricsFile(cwd: string): string {
