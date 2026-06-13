@@ -1,8 +1,12 @@
 # reckoner
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-00ffb2.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v0.1.0-00ffb2.svg)](https://github.com/sainzs/reckoner/releases)
+[![Random Access Theme](https://img.shields.io/badge/Random%20Access%20Theme-mint-000000.svg?color=00ffb2&labelColor=000000)](https://github.com/sainzs/random-access-themes)
+
 > *"Because we separate like ripples on a blank shore."*
 
-The memory and policy package for Agent Workbench.
+The memory and policy layer of the Random Access agent toolchain.
 
 ---
 
@@ -167,11 +171,14 @@ It accounts for things. It reasons through the mess.
 
 ## Portfolio
 
-Reckoner is the memory layer of the Random Access agent-workbench ecosystem:
+reckoner is the **memory layer** of the Random Access agent toolchain — four small packages that compose into one maintainer surface:
 
-- [santiagosainz-skills](https://github.com/sainzs/santiagosainz-skills) — portable maintainer workflows that lean on reckoner's verification and memory behavior
-- [registro](https://github.com/sainzs/registro) — agent work report CLI and web dashboard
-- [random-access-themes](https://github.com/sainzs/random-access-themes) — the design system the built-in `random` theme is generated from
+| Package | Layer | What it does |
+| --- | --- | --- |
+| [santiagosainz-skills](https://github.com/sainzs/santiagosainz-skills) | Workflow | Portable maintainer skills: review, planning, debug, verify, handoff |
+| **reckoner** | Memory | Agent memory, auto-verification, and guardrails |
+| [registro](https://github.com/sainzs/registro) | Reporting | Agent work report CLI and dashboard |
+| [random-access-themes](https://github.com/sainzs/random-access-themes) | Design system | OLED-black themes and tokens shared across the toolchain |
 
 ---
 
