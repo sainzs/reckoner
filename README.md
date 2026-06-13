@@ -119,7 +119,7 @@ The canonical task→model policy lives in [`docs/orientation-policy.md`](docs/o
 | `/orient` | Open orientation overlay (also `Ctrl+Shift+O`). |
 | `/inject` | Show last prompt injection trace and budget. |
 | `/task` | Show current task plan. |
-| `/tone` | Switch theme. Options: `dusk`, `factory`. |
+| `/tone` | Switch theme. Options: `random` (default), `dusk`, `factory`. |
 | `/snapshot` | Refresh and show workspace context. |
 | `/guardrails` | Show or toggle safety guardrails. |
 

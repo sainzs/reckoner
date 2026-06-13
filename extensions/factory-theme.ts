@@ -1,12 +1,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 
-const THEMES = ["reckoner-dusk", "reckoner-factory"] as const
-const DEFAULT_THEME = "reckoner-dusk"
+const THEMES = ["random-access", "reckoner-dusk", "reckoner-factory"] as const
+const DEFAULT_THEME = "random-access"
 const THEME_ENTRY = "reckoner-theme"
 
 type ThemeName = (typeof THEMES)[number]
 
 function normalizeTheme(input: string): ThemeName | null {
+  if (input === "random-access" || input === "random" || input === "rat") return "random-access"
   if (input === "dusk" || input === "reckoner-dusk") return "reckoner-dusk"
   if (input === "factory" || input === "reckoner-factory") return "reckoner-factory"
   return null
@@ -57,13 +58,13 @@ export default function factoryThemeExtension(pi: ExtensionAPI) {
   pi.on("session_fork",   onBranchChange)
 
   pi.registerCommand("tone", {
-    description: "Show or switch Reckoner themes (dusk/factory)",
+    description: "Show or switch Reckoner themes (random-access/dusk/factory)",
     handler: async (args: string, ctx: any) => {
       const input = args.trim().toLowerCase()
 
       if (!input) {
         ctx.ui.notify(
-          `Current theme: ${selectedTheme}\nAvailable: reckoner-dusk, reckoner-factory\nUse /tone dusk or /tone factory.`,
+          `Current theme: ${selectedTheme}\nAvailable: random-access, reckoner-dusk, reckoner-factory\nUse /tone random, /tone dusk, or /tone factory.`,
           "info",
         )
         return
@@ -71,7 +72,7 @@ export default function factoryThemeExtension(pi: ExtensionAPI) {
 
       const theme = normalizeTheme(input)
       if (!theme) {
-        ctx.ui.notify("Unknown theme. Use /tone dusk or /tone factory.", "warning")
+        ctx.ui.notify("Unknown theme. Use /tone random, /tone dusk, or /tone factory.", "warning")
         return
       }
 
