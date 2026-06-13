@@ -165,6 +165,14 @@ With markdown files and a feedback loop. Simple tools, used well, compounding ov
 The name comes from Radiohead's *In Rainbows*. A reckoner figures things out.
 It accounts for things. It reasons through the mess.
 
+## Portfolio
+
+Reckoner is the memory layer of the Random Access agent-workbench ecosystem:
+
+- [santiagosainz-skills](https://github.com/sainzs/santiagosainz-skills) — portable maintainer workflows that lean on reckoner's verification and memory behavior
+- [registro](https://github.com/sainzs/registro) — agent work report CLI and web dashboard
+- [random-access-themes](https://github.com/sainzs/random-access-themes) — the design system the built-in `random` theme is generated from
+
 ---
 
 [MIT License](LICENSE) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
