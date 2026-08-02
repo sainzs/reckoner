@@ -13,6 +13,7 @@ declare module "@sinclair/typebox" {
 
 declare module "@mariozechner/pi-tui" {
   export const truncateToWidth: any
+  export const visibleWidth: any
   export const matchesKey: any
 }
 
