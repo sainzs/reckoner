@@ -63,6 +63,35 @@ The loop is the thesis. These are the organs that support it:
 | **Guardrails** | Blocks writes to `.env`, `~/.ssh`, and key files. Dangerous commands require confirmation. |
 | **Principles** | Behavioral guidelines injected every session. Read before acting, smallest safe change, verify before done. |
 
+## Themes — four phosphors
+
+reckoner ships four terminal themes, each a love letter to a real tube —
+an amber EXECT-100, a green VT640 radar, a navy VT100 war room, and a teal
+winamp HUD. One philosophy binds them: *one phosphor, four brightnesses*.
+Hierarchy comes from luminance, the way real CRTs worked; syntax
+highlighting stays inside the phosphor family.
+
+| theme | tube | glow |
+|---|---|---|
+| `reckoner-exect` | EXECT-100 / DEC VT520 | amber |
+| `reckoner-scope` | DEC VT640 | P1 green |
+| `reckoner-wopr` | VT100 | navy + cyan |
+| `reckoner-darkspace` | dark.spaceAMP | teal wireframe |
+
+```bash
+/theme reckoner-exect      # inside pi, after /reload
+```
+
+<p align="center"><img src="themes/screenshots/reckoner-exect.png" alt="reckoner-exect — amber phosphor" width="720"/></p>
+
+Global install, the full gallery with live color previews, the token table,
+and the design philosophy live in **[themes/README.md](themes/README.md)**.
+
+They pair with the harness footer — the braille **ink system** in
+`extensions/harness-footer.ts`: a drop that swells when the harness is
+alive, a `CONTEXT` well of remaining room, a `STEPS` trail of progress.
+Labels are silkscreen, values are the phosphor.
+
 ## Getting started
 
 ```bash
@@ -123,7 +152,7 @@ The canonical task→model policy lives in [`docs/orientation-policy.md`](docs/o
 | `/orient` | Open orientation overlay (also `Ctrl+Shift+O`). |
 | `/inject` | Show last prompt injection trace and budget. |
 | `/task` | Show current task plan. |
-| `/tone` | Switch theme. Options: `random` (default), `dusk`, `factory`. |
+| `/tone` | Switch theme. Options: `random` (default), `dusk`, `factory`, plus the four phosphors in [themes/](themes/README.md). |
 | `/snapshot` | Refresh and show workspace context. |
 | `/guardrails` | Show or toggle safety guardrails. |
 
@@ -179,6 +208,10 @@ reckoner is the **memory layer** of the Random Access agent toolchain — four s
 | **reckoner** | Memory | Agent memory, auto-verification, and guardrails |
 | [registro](https://github.com/sainzs/registro) | Reporting | Agent work report CLI and dashboard |
 | [random-access-themes](https://github.com/sainzs/random-access-themes) | Design system | OLED-black themes and tokens shared across the toolchain |
+
+**reckoner themes** are the phosphor siblings of the OLED-black tokens —
+four retro tubes in [`themes/`](themes/README.md), usable standalone or
+with the harness footer.
 
 ---
 

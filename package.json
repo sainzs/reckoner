@@ -1,8 +1,8 @@
 {
   "name": "reckoner",
   "version": "0.1.0",
-  "description": "Agent Workbench memory and policy package for persistent learning loops.",
-  "keywords": ["pi-package", "coding-agent", "pi", "agent-workbench", "memory", "policy"],
+  "description": "Memory and policy package for pi — persistent learning loops, harness footer, and four phosphor terminal themes.",
+  "keywords": ["pi-package", "coding-agent", "pi", "agent-workbench", "memory", "policy", "theme", "themes", "phosphor", "retro-terminal", "vt100", "amber", "terminal-theme", "harness"],
   "author": "sainzs",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run test:unit",
     "test:unit": "tsx --test tests/**/*.test.ts",
-    "verify:self": "npm run typecheck && npm run test:unit"
+    "verify:themes": "node scripts/validate-themes.mjs",
+    "render:screenshots": "python3 scripts/render-screenshots.py",
+    "verify:self": "npm run typecheck && npm run test:unit && npm run verify:themes"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
