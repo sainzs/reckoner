@@ -8,6 +8,8 @@
 
 The memory and policy layer of the Random Access agent toolchain.
 
+![reckoner verifying itself and loading lessons into pi](assets/hero.gif)
+
 ---
 
 ## The problem
